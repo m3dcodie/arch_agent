@@ -31,7 +31,7 @@ class BedrockProvider(LLMProvider):
         """
         self.model_id = model_id or os.getenv(
             "ANTHROPIC_MODEL",
-            os.getenv("LLM_MODEL_ID", "amazon.nova-lite-v1:0")
+            os.getenv("LLM_MODEL_ID", "au.anthropic.claude-sonnet-4-5-20250929-v1:0")
         )
         self.region = region or os.getenv("AWS_REGION", "us-east-1")
         self.profile_name = profile_name or os.getenv("AWS_PROFILE", "default")
@@ -68,27 +68,28 @@ class BedrockProvider(LLMProvider):
             **kwargs
         }
         
-        # Determine provider based on model ID
-        # Check if model_id starts with a region prefix (e.g., 'au.', 'us.', 'eu.')
+        # Check if model uses inference profile (starts with region prefix like 'au.', 'us.', 'eu.')
         model_id_parts = self.model_id.split(".")
+        is_inference_profile = len(model_id_parts) > 1 and len(model_id_parts[0]) == 2
         
-        # Determine provider from model name
-        if "anthropic" in self.model_id or "claude" in self.model_id:
-            config["provider"] = "anthropic"
-            print(f"[DEBUG] Using model: {self.model_id} with provider=anthropic")
-        elif "amazon" in self.model_id or "nova" in self.model_id:
+        # Determine provider based on model ID
+        if "amazon" in self.model_id or "nova" in self.model_id:
             # Amazon Nova models require the Converse API
             config["beta_use_converse_api"] = True
             print(f"[DEBUG] Using model: {self.model_id} with Converse API")
+        elif is_inference_profile:
+            # Inference profiles require Converse API
+            config["beta_use_converse_api"] = True
+            print(f"[DEBUG] Using inference profile: {self.model_id} with Converse API")
+        elif "anthropic" in self.model_id or "claude" in self.model_id:
+            # Base model IDs need provider specified
+            config["provider"] = "anthropic"
+            print(f"[DEBUG] Using model: {self.model_id} with provider=anthropic")
         else:
             # For other models, let LangChain auto-detect
             print(f"[DEBUG] Using model: {self.model_id} (provider auto-detected)")
         
         llm = ChatBedrock(**config)
-        
-        # Bind the provider parameter to ensure it's preserved in with_structured_output
-        if config.get("provider"):
-            llm = llm.bind(provider=config["provider"])
         
         return llm
     

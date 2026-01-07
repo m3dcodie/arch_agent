@@ -61,6 +61,9 @@ class Violation(BaseModel):
 
 class ViolationList(BaseModel):
     """List of violations returned by auditor"""
+    
+    model_config = {"json_schema_extra": {"description": "List of policy violations found during audit"}}
+    
     violations: List[Violation] = Field(
         default_factory=list,
         description="List of policy violations found"
@@ -102,6 +105,9 @@ class TerraformResource(BaseModel):
 
 class ResourceList(BaseModel):
     """List of parsed Terraform resources"""
+    
+    model_config = {"json_schema_extra": {"description": "List of parsed Terraform resources from IaC code"}}
+    
     resources: List[TerraformResource] = Field(
         default_factory=list,
         description="List of parsed resources"
