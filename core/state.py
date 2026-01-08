@@ -6,6 +6,7 @@ from typing_extensions import TypedDict
 import operator
 
 from models.violations import Violation, TerraformResource, AuditStatus
+from models.policy import Policy
 
 
 class AgentState(TypedDict):
@@ -25,6 +26,8 @@ class AgentState(TypedDict):
     
     # Processing data
     parsed_resources: List[TerraformResource]  # Extracted resource definitions
+    retrieved_policies: List[Policy]  # Policies retrieved from RAG (Phase 2)
+    resource_types: List[str]  # Resource types extracted for policy retrieval (Phase 2)
     
     # Output data
     violations: List[Violation]  # Found policy violations

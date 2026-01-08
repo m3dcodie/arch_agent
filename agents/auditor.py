@@ -1,5 +1,5 @@
 """
-Auditor agent - Checks for deletion protection policy compliance.
+Auditor agent - Checks resources against retrieved policies (Phase 2: RAG-enabled).
 """
 import uuid
 from typing import Dict, Any, List
@@ -8,9 +8,11 @@ from langchain_core.language_models import BaseChatModel
 
 from core.state import AgentState
 from models.violations import Violation, ViolationList, Severity, AuditStatus, TerraformResource
+from models.policy import Policy
 
 
-AUDITOR_PROMPT = """You are a security auditor specializing in database infrastructure compliance.
+# Fallback prompt for when RAG is disabled or no policies retrieved
+FALLBACK_AUDITOR_PROMPT = """You are a security auditor specializing in database infrastructure compliance.
 
 Your task is to check if database resources have deletion protection enabled.
 
@@ -48,7 +50,10 @@ Be strict: if deletion_protection is missing or set to false, it's a HIGH severi
 
 def auditor_node(state: AgentState, llm: BaseChatModel) -> Dict[str, Any]:
     """
-    Audit parsed resources for deletion protection compliance.
+    Audit parsed resources against retrieved policies (Phase 2: RAG-enabled).
+    
+    This agent now uses policies retrieved by the policy_analyst node to
+    perform dynamic, multi-policy auditing instead of hardcoded rules.
     
     Args:
         state: Current agent state
@@ -59,6 +64,7 @@ def auditor_node(state: AgentState, llm: BaseChatModel) -> Dict[str, Any]:
     """
     try:
         parsed_resources = state.get("parsed_resources", [])
+        retrieved_policies = state.get("retrieved_policies", [])
         
         # If no resources to audit, pass the audit
         if not parsed_resources:
@@ -72,8 +78,18 @@ def auditor_node(state: AgentState, llm: BaseChatModel) -> Dict[str, Any]:
         # Convert resources to JSON for the prompt
         resources_json = _format_resources_for_prompt(parsed_resources)
         
+        # Build prompt based on whether we have retrieved policies
+        if retrieved_policies:
+            # Phase 2: Dynamic prompt from retrieved policies
+            prompt_text = _build_dynamic_prompt(parsed_resources, retrieved_policies)
+            message_prefix = f"[AUDITOR] Auditing against {len(retrieved_policies)} retrieved policies"
+        else:
+            # Fallback: Use hardcoded prompt (Phase 1 behavior)
+            prompt_text = FALLBACK_AUDITOR_PROMPT.format(resources_json=resources_json)
+            message_prefix = "[AUDITOR] Using fallback policy (RAG disabled or no policies found)"
+        
         # Create prompt
-        prompt = ChatPromptTemplate.from_template(AUDITOR_PROMPT)
+        prompt = ChatPromptTemplate.from_template(prompt_text)
         
         # Use structured output with Pydantic model
         structured_llm = llm.with_structured_output(ViolationList)
@@ -82,7 +98,10 @@ def auditor_node(state: AgentState, llm: BaseChatModel) -> Dict[str, Any]:
         chain = prompt | structured_llm
         
         # Invoke the chain
-        result = chain.invoke({"resources_json": resources_json})
+        if retrieved_policies:
+            result = chain.invoke({"resources_json": resources_json})
+        else:
+            result = chain.invoke({"resources_json": resources_json})
         
         # Extract violations
         violations = result.violations if result else []
@@ -104,7 +123,7 @@ def auditor_node(state: AgentState, llm: BaseChatModel) -> Dict[str, Any]:
             "violations": violations,
             "current_node": "auditor",
             "status": status,
-            "messages": [message]
+            "messages": [message_prefix, message]
         }
         
     except Exception as e:
@@ -115,6 +134,84 @@ def auditor_node(state: AgentState, llm: BaseChatModel) -> Dict[str, Any]:
             "error_message": f"Auditor failed: {str(e)}",
             "messages": [f"[AUDITOR] ERROR: {str(e)}"]
         }
+
+
+def _build_dynamic_prompt(resources: List[TerraformResource], policies: List[Policy]) -> str:
+    """
+    Build a dynamic audit prompt from retrieved policies.
+    
+    Args:
+        resources: List of parsed Terraform resources
+        policies: List of retrieved Policy objects
+        
+    Returns:
+        Formatted prompt string with policies and resources
+    """
+    prompt = """You are a security auditor specializing in infrastructure compliance.
+
+Your task is to audit the provided Terraform resources against the following policies.
+
+"""
+    
+    # Add each policy to the prompt
+    prompt += "=" * 80 + "\n"
+    prompt += "POLICIES TO ENFORCE:\n"
+    prompt += "=" * 80 + "\n\n"
+    
+    for i, policy in enumerate(policies, 1):
+        prompt += f"### Policy {i}: {policy.title}\n"
+        prompt += f"**Policy ID:** `{policy.id}`\n"
+        prompt += f"**Severity:** {policy.severity}\n"
+        prompt += f"**Description:** {policy.description}\n\n"
+        
+        # Include requirements (truncated if too long)
+        requirements = policy.requirements[:1000] if len(policy.requirements) > 1000 else policy.requirements
+        prompt += f"**Requirements:**\n{requirements}\n\n"
+        
+        if policy.remediation:
+            prompt += f"**Remediation:** {policy.remediation}\n\n"
+        
+        prompt += "-" * 80 + "\n\n"
+    
+    # Add resources section
+    prompt += "=" * 80 + "\n"
+    prompt += "RESOURCES TO AUDIT:\n"
+    prompt += "=" * 80 + "\n\n"
+    prompt += "{resources_json}\n\n"
+    
+    # Add instructions
+    prompt += """
+INSTRUCTIONS:
+1. Check each resource against ALL applicable policies above
+2. For each violation found, identify:
+   - Which policy was violated (use the policy_ref field with the Policy ID)
+   - The specific resource and attribute causing the violation
+   - The severity level from the policy
+   - A clear description of what's wrong
+   - A remediation hint on how to fix it
+
+Return violations in this JSON format:
+{{
+  "violations": [
+    {{
+      "id": "unique-id",
+      "resource_type": "aws_db_instance",
+      "resource_name": "resource_name",
+      "severity": "HIGH",
+      "policy_ref": "policy_id_from_above",
+      "description": "Clear description of the violation",
+      "line_number": 10,
+      "remediation_hint": "How to fix this violation"
+    }}
+  ]
+}}
+
+If all resources are compliant with all policies, return: {{"violations": []}}
+
+Be thorough: check each resource against each applicable policy.
+"""
+    
+    return prompt
 
 
 def _format_resources_for_prompt(resources: List[TerraformResource]) -> str:

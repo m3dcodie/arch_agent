@@ -137,7 +137,7 @@ def main():
     print("-" * 70)
     
     try:
-        result = graph.invoke(
+        result = graph.invo1ke(
             iac_code=iac_code,
             file_path=file_path
         )

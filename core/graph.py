@@ -10,6 +10,7 @@ from core.state import AgentState
 from core.llm_provider import LLMFactory
 from core.database_provider import DatabaseFactory
 from agents.intake import intake_node
+from agents.policy_analyst import policy_analyst_node
 from agents.auditor import auditor_node
 from models.violations import AuditStatus
 
@@ -54,6 +55,9 @@ class ADAGGraph:
         """
         Build the LangGraph workflow.
         
+        Phase 2 workflow:
+        START -> intake -> policy_analyst -> auditor -> END
+        
         Returns:
             Compiled graph ready for execution
         """
@@ -62,6 +66,7 @@ class ADAGGraph:
         
         # Add nodes with LLM binding
         workflow.add_node("intake", lambda state: intake_node(state, self.llm))
+        workflow.add_node("policy_analyst", lambda state: policy_analyst_node(state))
         workflow.add_node("auditor", lambda state: auditor_node(state, self.llm))
         
         # Define the flow
@@ -71,6 +76,16 @@ class ADAGGraph:
         workflow.add_conditional_edges(
             "intake",
             self._should_continue_after_intake,
+            {
+                "policy_analyst": "policy_analyst",
+                "end": END
+            }
+        )
+        
+        # Add conditional edge from policy_analyst
+        workflow.add_conditional_edges(
+            "policy_analyst",
+            self._should_continue_after_policy_analyst,
             {
                 "auditor": "auditor",
                 "end": END
@@ -86,7 +101,7 @@ class ADAGGraph:
     
     def _should_continue_after_intake(self, state: AgentState) -> str:
         """
-        Determine if we should continue to auditor or end.
+        Determine if we should continue to policy_analyst or end.
         
         Args:
             state: Current agent state
@@ -100,6 +115,30 @@ class ADAGGraph:
         
         # If no resources were parsed, end the workflow
         if not state.get("parsed_resources"):
+            return "end"
+        
+        # Otherwise, continue to policy_analyst
+        return "policy_analyst"
+    
+    def _should_continue_after_policy_analyst(self, state: AgentState) -> str:
+        """
+        Determine if we should continue to auditor or end.
+        
+        Args:
+            state: Current agent state
+            
+        Returns:
+            Next node name or 'end'
+        """
+        # If policy analyst failed, end the workflow
+        if state.get("status") == AuditStatus.ERROR:
+            return "end"
+        
+        # If no policies were retrieved, we can still continue to auditor
+        # (it will handle the fallback to hardcoded policies)
+        # But if explicitly disabled, end here
+        use_rag = os.getenv("USE_RAG", "true").lower() == "true"
+        if not use_rag and not state.get("retrieved_policies"):
             return "end"
         
         # Otherwise, continue to auditor
@@ -122,6 +161,8 @@ class ADAGGraph:
             "file_path": file_path,
             "messages": [],
             "parsed_resources": [],
+            "retrieved_policies": [],
+            "resource_types": [],
             "violations": [],
             "status": AuditStatus.PENDING,
             "current_node": "",
@@ -151,6 +192,8 @@ class ADAGGraph:
             "file_path": file_path,
             "messages": [],
             "parsed_resources": [],
+            "retrieved_policies": [],
+            "resource_types": [],
             "violations": [],
             "status": AuditStatus.PENDING,
             "current_node": "",

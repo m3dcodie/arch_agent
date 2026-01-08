@@ -5,7 +5,7 @@ import pytest
 from pathlib import Path
 
 # Mock LLM for testing without AWS credentials
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, MagicMock, patch
 from langchain_core.messages import AIMessage
 
 from models.violations import (
@@ -17,7 +17,7 @@ from models.violations import (
 @pytest.fixture
 def mock_llm():
     """Create a mock LLM for testing"""
-    llm = Mock()
+    llm = MagicMock()
     return llm
 
 
@@ -133,10 +133,13 @@ class TestIntakeAgent:
             ]
         )
         
-        mock_chain = Mock()
-        mock_chain.invoke.return_value = mock_result
+        # Create a mock that properly returns the chain
+        def mock_with_structured_output(schema):
+            mock_chain = MagicMock()
+            mock_chain.invoke = MagicMock(return_value=mock_result)
+            return mock_chain
         
-        mock_llm.with_structured_output.return_value = mock_chain
+        mock_llm.with_structured_output = mock_with_structured_output
         
         # Create initial state
         state = {
@@ -144,6 +147,8 @@ class TestIntakeAgent:
             "file_path": "test.tf",
             "messages": [],
             "parsed_resources": [],
+            "retrieved_policies": [],
+            "resource_types": [],
             "violations": [],
             "status": AuditStatus.PENDING,
             "current_node": "",
@@ -181,10 +186,13 @@ class TestAuditorAgent:
             ]
         )
         
-        mock_chain = Mock()
-        mock_chain.invoke.return_value = mock_result
+        # Create a mock that properly returns the chain
+        def mock_with_structured_output(schema):
+            mock_chain = MagicMock()
+            mock_chain.invoke = MagicMock(return_value=mock_result)
+            return mock_chain
         
-        mock_llm.with_structured_output.return_value = mock_chain
+        mock_llm.with_structured_output = mock_with_structured_output
         
         # Create state with parsed resources
         state = {
@@ -199,6 +207,8 @@ class TestAuditorAgent:
                     line_number=1
                 )
             ],
+            "retrieved_policies": [],
+            "resource_types": [],
             "violations": [],
             "status": AuditStatus.IN_PROGRESS,
             "current_node": "intake",
@@ -220,10 +230,13 @@ class TestAuditorAgent:
         # Mock the structured output with no violations
         mock_result = ViolationList(violations=[])
         
-        mock_chain = Mock()
-        mock_chain.invoke.return_value = mock_result
+        # Create a mock that properly returns the chain
+        def mock_with_structured_output(schema):
+            mock_chain = MagicMock()
+            mock_chain.invoke = MagicMock(return_value=mock_result)
+            return mock_chain
         
-        mock_llm.with_structured_output.return_value = mock_chain
+        mock_llm.with_structured_output = mock_with_structured_output
         
         # Create state with compliant resources
         state = {
@@ -238,6 +251,8 @@ class TestAuditorAgent:
                     line_number=1
                 )
             ],
+            "retrieved_policies": [],
+            "resource_types": [],
             "violations": [],
             "status": AuditStatus.IN_PROGRESS,
             "current_node": "intake",
@@ -261,6 +276,8 @@ class TestAuditorAgent:
             "file_path": "test.tf",
             "messages": [],
             "parsed_resources": [],
+            "retrieved_policies": [],
+            "resource_types": [],
             "violations": [],
             "status": AuditStatus.IN_PROGRESS,
             "current_node": "intake",
