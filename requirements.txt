@@ -22,6 +22,3 @@ python-dotenv==1.0.1
 # Utilities
 typing-extensions==4.12.2
 
-# Phase 2: RAG and Vector Database
-chromadb==0.4.22
-sentence-transformers==2.3.1

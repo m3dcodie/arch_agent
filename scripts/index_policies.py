@@ -18,7 +18,10 @@ from typing import Dict, List
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from core.rag_provider import RAGFactory
+import requests
+from rag_service_config import (
+    INGESTION_URL, CHUNKING_URL, EMBEDDING_URL, ADD_VECTORS_URL, APPID
+)
 
 # Configure logging
 logging.basicConfig(
@@ -138,24 +141,12 @@ def index_policies(
     logger.info("ADAG Policy Indexing Script")
     logger.info("=" * 70)
     
-    # Initialize RAG provider
-    logger.info("Initializing ChromaDB provider...")
-    try:
-        rag = RAGFactory.create_provider("chroma")
-        rag.initialize(collection_name=collection_name)
-    except Exception as e:
-        logger.error(f"Failed to initialize RAG provider: {e}")
-        return 0
+    # REST API base URL and appid
+    headers = {"Content-Type": "application/json"}
     
-    # Reindex if requested
+    # Reindex if requested (not supported directly, so log only)
     if reindex:
-        logger.info("🔄 Reindexing: Deleting existing collection...")
-        try:
-            rag.delete_collection()
-            rag.initialize(collection_name=collection_name)
-            logger.info("✓ Collection deleted and recreated")
-        except Exception as e:
-            logger.warning(f"Could not delete collection (may not exist): {e}")
+        logger.info("🔄 Reindexing: Please clear vector DB via API or admin if needed.")
     
     # Find all markdown files
     policies_path = Path(policies_dir)
@@ -170,76 +161,91 @@ def index_policies(
         logger.warning("No policy files found!")
         return 0
     
-    # Parse and index each policy
-    documents = []
+    # Parse and index each policy using REST API
     for policy_file in sorted(policy_files):
         logger.info(f"   Processing: {policy_file.name}")
-        
         policy_data = parse_policy_markdown(str(policy_file))
-        
         if not policy_data:
             logger.warning(f"   ⚠️  Skipped: Could not parse {policy_file.name}")
             continue
-        
-        # Create document for indexing
-        documents.append({
-            "id": policy_data["id"],
-            "content": policy_data["content"],
-            "metadata": {
+
+        # 1. Ingest document
+        ingest_payload = {
+            "source_type": "local",
+            "config": {
+                "id": policy_data["id"],
                 "title": policy_data["title"],
                 "severity": policy_data["severity"],
                 "file_path": str(policy_file),
-                "scope": ",".join(policy_data["scope"]) if policy_data["scope"] else ""
+                "scope": policy_data["scope"],
+                "content": policy_data["content"]
             }
-        })
-        
-        logger.info(f"   ✓ Parsed: {policy_data['title']} ({policy_data['severity']})")
-    
-    # Index all documents
-    if documents:
-        logger.info(f"\n💾 Indexing {len(documents)} policies into ChromaDB...")
+        }
         try:
-            rag.index_documents(documents)
-            logger.info("✅ Indexing complete!")
+            ingest_resp = requests.post(INGESTION_URL.format(appid=APPID), json=ingest_payload, headers=headers)
+            ingest_resp.raise_for_status()
+            ingest_result = ingest_resp.json()
+            logger.info(f"   ✓ Ingested: {policy_data['title']} ({policy_data['severity']})")
         except Exception as e:
-            logger.error(f"Error indexing documents: {e}")
-            return 0
-    else:
-        logger.warning("No documents to index")
-        return 0
-    
-    # Get collection stats
-    stats = rag.get_collection_stats()
-    logger.info(f"\n📊 Collection Statistics:")
-    logger.info(f"   Collection: {stats.get('collection_name', 'N/A')}")
-    logger.info(f"   Documents: {stats.get('document_count', 0)}")
-    logger.info(f"   Location: {stats.get('persist_directory', 'N/A')}")
-    
-    # Test retrieval
-    logger.info(f"\n🔍 Testing retrieval...")
-    test_queries = [
-        "database deletion protection",
-        "S3 bucket encryption",
-        "production availability requirements"
-    ]
-    
-    for query in test_queries:
+            logger.error(f"   Error ingesting {policy_file.name}: {e}")
+            continue
+
+        # 2. Chunk document
+        chunk_payload = {
+            "document": ingest_payload["config"],
+            "chunker_type": "default",
+            "chunker_config": {}
+        }
         try:
-            results = rag.retrieve(query, top_k=3)
-            logger.info(f"\n   Query: '{query}'")
-            logger.info(f"   Retrieved {len(results)} policies:")
-            for i, result in enumerate(results, 1):
-                title = result['metadata'].get('title', 'Unknown')
-                distance = result.get('distance', 'N/A')
-                logger.info(f"      {i}. {title} (distance: {distance:.4f})" if isinstance(distance, float) else f"      {i}. {title}")
+            chunk_resp = requests.post(CHUNKING_URL.format(appid=APPID), json=chunk_payload, headers=headers)
+            chunk_resp.raise_for_status()
+            chunks = chunk_resp.json().get("chunks", [])
+            logger.info(f"   ✓ Chunked: {len(chunks)} chunks")
         except Exception as e:
-            logger.error(f"   Error testing query '{query}': {e}")
-    
-    logger.info("\n" + "=" * 70)
-    logger.info("✅ Policy indexing completed successfully!")
-    logger.info("=" * 70)
-    
-    return len(documents)
+            logger.error(f"   Error chunking {policy_file.name}: {e}")
+            continue
+
+        if not chunks:
+            logger.warning(f"   ⚠️  No chunks produced for {policy_file.name}")
+            continue
+
+        # 3. Embed chunks
+        texts = [chunk.get("content", chunk.get("document", "")) for chunk in chunks]
+        embed_payload = {
+            "texts": texts,
+            "embedder_type": "default",
+            "embedder_config": {}
+        }
+        try:
+            embed_resp = requests.post(EMBEDDING_URL.format(appid=APPID), json=embed_payload, headers=headers)
+            embed_resp.raise_for_status()
+            embeddings = embed_resp.json().get("embeddings", [])
+            logger.info(f"   ✓ Embedded: {len(embeddings)} vectors")
+        except Exception as e:
+            logger.error(f"   Error embedding {policy_file.name}: {e}")
+            continue
+
+        if not embeddings or len(embeddings) != len(chunks):
+            logger.warning(f"   ⚠️  Embedding count mismatch for {policy_file.name}")
+            continue
+
+        # 4. Add vectors to vector DB
+        add_vectors_payload = {
+            "vectors": embeddings,
+            "metadatas": [chunk.get("metadata", {}) for chunk in chunks],
+            "adapter_type": "default",
+            "adapter_config": {}
+        }
+        try:
+            add_vectors_resp = requests.post(ADD_VECTORS_URL.format(appid=APPID), json=add_vectors_payload, headers=headers)
+            add_vectors_resp.raise_for_status()
+            logger.info(f"   ✓ Added vectors to DB for {policy_data['title']}")
+        except Exception as e:
+            logger.error(f"   Error adding vectors for {policy_file.name}: {e}")
+            continue
+
+    logger.info("\n✅ Policy indexing pipeline completed via REST API!")
+    return len(policy_files)
 
 
 def main():

@@ -4,7 +4,8 @@ Policy Analyst agent - Retrieves relevant policies via RAG.
 import os
 from typing import Dict, Any, List
 from core.state import AgentState
-from core.rag_provider import RAGFactory
+import requests
+from rag_service_config import CONTEXT_AUG_URL, APPID
 from models.policy import Policy
 from models.violations import AuditStatus
 
@@ -61,56 +62,54 @@ def policy_analyst_node(state: AgentState) -> Dict[str, Any]:
                 "messages": ["[POLICY_ANALYST] RAG disabled, skipping policy retrieval"]
             }
         
-        # Initialize RAG provider
-        rag_provider = os.getenv("RAG_PROVIDER", "chroma")
-        chroma_dir = os.getenv("CHROMA_PERSIST_DIR", "./data/chroma")
-        
-        rag = RAGFactory.create_provider(rag_provider, persist_directory=chroma_dir)
-        rag.initialize(collection_name="policies")
-        
-        # Check if collection has documents
-        stats = rag.get_collection_stats()
-        if stats.get("document_count", 0) == 0:
+        # Call REST API for context augmentation
+        endpoint = CONTEXT_AUG_URL.format(appid=APPID)
+        payload = {
+            "question": query,
+            "metadata": {"resource_types": resource_types}
+        }
+        headers = {"Content-Type": "application/json"}
+        try:
+            response = requests.post(endpoint, json=payload, headers=headers)
+            response.raise_for_status()
+            data = response.json()
+        except Exception as e:
             return {
                 "retrieved_policies": [],
                 "resource_types": resource_types,
                 "current_node": "policy_analyst",
                 "status": AuditStatus.ERROR,
-                "error_message": "No policies indexed. Run: python scripts/index_policies.py",
-                "messages": ["[POLICY_ANALYST] ERROR: No policies found in vector database"]
+                "error_message": f"RAG API call failed: {str(e)}",
+                "messages": [f"[POLICY_ANALYST] ERROR: RAG API call failed: {str(e)}"]
             }
-        
-        # Retrieve relevant policies (top 5 by default)
-        top_k = int(os.getenv("RAG_TOP_K", "5"))
-        results = rag.retrieve(query, top_k=top_k)
-        
-        # Convert RAG results to Policy objects
+
+        # Parse relevant_chunks from API response
+        relevant_chunks = data.get("relevant_chunks", [])
         retrieved_policies = []
-        for result in results:
-            metadata = result.get("metadata", {})
-            
-            # Create Policy object from retrieved document
+        for chunk in relevant_chunks:
+            metadata = chunk.get("metadata", {})
+            content = chunk.get("document", "")
             policy = Policy(
-                id=result.get("id", "unknown"),
+                id=metadata.get("id", "unknown"),
                 title=metadata.get("title", "Unknown Policy"),
                 severity=metadata.get("severity", "MEDIUM"),
-                description=_extract_description(result.get("content", "")),
-                scope=resource_types,  # Scope is the resource types we're checking
-                requirements=result.get("content", ""),  # Full policy content
-                examples_compliant=_extract_section(result.get("content", ""), "Compliant Example"),
-                examples_non_compliant=_extract_section(result.get("content", ""), "Non-Compliant Example"),
-                remediation=_extract_section(result.get("content", ""), "Remediation"),
+                description=_extract_description(content),
+                scope=resource_types,
+                requirements=content,
+                examples_compliant=_extract_section(content, "Compliant Example"),
+                examples_non_compliant=_extract_section(content, "Non-Compliant Example"),
+                remediation=_extract_section(content, "Remediation"),
                 file_path=metadata.get("file_path"),
-                distance=result.get("distance")
+                distance=chunk.get("distance")
             )
             retrieved_policies.append(policy)
-        
+
         return {
             "retrieved_policies": retrieved_policies,
             "resource_types": resource_types,
             "current_node": "policy_analyst",
             "messages": [
-                f"[POLICY_ANALYST] Retrieved {len(retrieved_policies)} relevant policies",
+                f"[POLICY_ANALYST] Retrieved {len(retrieved_policies)} relevant policies via REST API",
                 f"[POLICY_ANALYST] Resource types: {', '.join(resource_types)}"
             ]
         }

@@ -1,0 +1,322 @@
+openapi: 3.0.3
+info:
+  title: Context Augmentation Service API
+  description: REST API for augmenting user queries with relevant context from RAG pipeline
+  version: 1.0.0
+servers:
+  - url: http://localhost:8000
+paths:
+  /ingest/{appid}:
+    post:
+      summary: Ingest documents for an application
+      parameters:
+        - name: appid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Application ID for scoping operations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                source_type:
+                  type: string
+                  description: Source type (e.g., local, direct)
+                  enum: [local, direct]
+                config:
+                  type: object
+                  description: |
+                    Configuration for the source.
+                    For 'local': {"paths": ["/path/to/file.txt"]}
+                    For 'direct': {"documents": [{"content": "...", ...}]}
+              required:
+                - source_type
+                - config
+      responses:
+        "200":
+          description: Ingestion result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  documents:
+                    type: array
+                    items:
+                      type: object
+          examples:
+            direct:
+              summary: Direct document ingestion
+              value:
+                status: success
+                documents:
+                  - content: "Document 1 text"
+                    meta:
+                      title: "Doc 1"
+                    doc_id: "direct_0"
+                  - content: "Document 2 text"
+                    doc_id: "direct_1"
+        "400":
+          description: Invalid request
+        "500":
+          description: Internal server error
+  /chunk/{appid}:
+    post:
+      summary: Chunk a document for an application
+      parameters:
+        - name: appid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Application ID for scoping operations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                document:
+                  type: object
+                  description: Document to chunk
+                chunker_type:
+                  type: string
+                  description: Chunker type
+                chunker_config:
+                  type: object
+                  description: Chunker configuration
+              required:
+                - document
+      responses:
+        "200":
+          description: Chunking result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  chunks:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          description: Invalid request
+        "500":
+          description: Internal server error
+  /embed/{appid}:
+    post:
+      summary: Embed texts for an application
+      parameters:
+        - name: appid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Application ID for scoping operations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                texts:
+                  type: array
+                  items:
+                    type: string
+                  description: Texts to embed
+                embedder_type:
+                  type: string
+                  description: Embedder type
+                embedder_config:
+                  type: object
+                  description: Embedder configuration
+              required:
+                - texts
+      responses:
+        "200":
+          description: Embedding result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  embeddings:
+                    type: array
+                    items:
+                      type: array
+                      items:
+                        type: number
+        "400":
+          description: Invalid request
+        "500":
+          description: Internal server error
+  /add_vectors/{appid}:
+    post:
+      summary: Add vectors to vector DB for an application
+      parameters:
+        - name: appid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Application ID for scoping operations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                vectors:
+                  type: array
+                  items:
+                    type: array
+                    items:
+                      type: number
+                  description: Vectors to add
+                metadatas:
+                  type: array
+                  items:
+                    type: object
+                  description: Metadata for vectors
+                adapter_type:
+                  type: string
+                  description: Adapter type
+                adapter_config:
+                  type: object
+                  description: Adapter configuration
+              required:
+                - vectors
+                - metadatas
+      responses:
+        "200":
+          description: Add vectors result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        "400":
+          description: Invalid request
+        "500":
+          description: Internal server error
+  /query/{appid}:
+    post:
+      summary: Query vector DB for an application
+      parameters:
+        - name: appid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Application ID for scoping operations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query_vector:
+                  type: array
+                  items:
+                    type: number
+                  description: Query vector
+                top_k:
+                  type: integer
+                  description: Number of results
+                adapter_type:
+                  type: string
+                  description: Adapter type
+                adapter_config:
+                  type: object
+                  description: Adapter configuration
+              required:
+                - query_vector
+      responses:
+        "200":
+          description: Query result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          description: Invalid request
+        "500":
+          description: Internal server error
+  /context-augment/{appid}:
+    post:
+      summary: Augment user question with relevant context
+      parameters:
+        - name: appid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Application ID for scoping operations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                question:
+                  type: string
+                  description: User's question or prompt
+                metadata:
+                  type: object
+                  description: Optional metadata for context retrieval
+              required:
+                - question
+      responses:
+        "200":
+          description: Augmented context and relevant chunks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  augmented_context:
+                    type: string
+                    description: Enriched context for LLM
+                  relevant_chunks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        document:
+                          type: string
+                        metadata:
+                          type: object
+                        distance:
+                          type: number
+        "400":
+          description: Invalid request
+        "500":
+          description: Internal server error
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+security:
+  - ApiKeyAuth: []
