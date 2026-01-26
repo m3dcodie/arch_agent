@@ -190,11 +190,11 @@ def index_policies(
             logger.error(f"   Error ingesting {policy_file.name}: {e}")
             continue
 
-        # 2. Chunk document
+        # 2. Chunk document (send full document object)
         chunk_payload = {
             "document": ingest_payload["config"],
-            "chunker_type": "default",
-            "chunker_config": {}
+            "chunker_type": "langchain",
+            "chunker_config": {"chunk_size": 200, "chunk_overlap": 50}
         }
         try:
             chunk_resp = requests.post(CHUNKING_URL.format(appid=APPID), json=chunk_payload, headers=headers)
@@ -217,7 +217,10 @@ def index_policies(
             "embedder_config": {}
         }
         try:
+            logger.info(f"[EMBED] Request payload: {embed_payload}")
             embed_resp = requests.post(EMBEDDING_URL.format(appid=APPID), json=embed_payload, headers=headers)
+            logger.info(f"[EMBED] Status code: {embed_resp.status_code}")
+            logger.info(f"[EMBED] Response: {getattr(embed_resp, 'text', embed_resp)}")
             embed_resp.raise_for_status()
             embeddings = embed_resp.json().get("embeddings", [])
             logger.info(f"   ✓ Embedded: {len(embeddings)} vectors")
@@ -230,10 +233,19 @@ def index_policies(
             continue
 
         # 4. Add vectors to vector DB
+        # Ensure each metadata is non-empty: include at least 'text' and 'chunk_index'
+        metadatas = []
+        for i, chunk in enumerate(chunks):
+            meta = dict(chunk.get("metadata") or {})
+            # Always include 'text' and 'chunk_index'
+            meta["text"] = chunk.get("chunk") or chunk.get("content") or ""
+            meta["chunk_index"] = chunk.get("index", i)
+            # Remove empty keys
+            meta = {k: v for k, v in meta.items() if v not in (None, "")}
+            metadatas.append(meta)
         add_vectors_payload = {
             "vectors": embeddings,
-            "metadatas": [chunk.get("metadata", {}) for chunk in chunks],
-            "adapter_type": "default",
+            "metadatas": metadatas,
             "adapter_config": {}
         }
         try:

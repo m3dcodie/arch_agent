@@ -68,7 +68,7 @@ paths:
           description: Internal server error
   /chunk/{appid}:
     post:
-      summary: Chunk a document for an application
+      summary: Chunk a document for an application (requires full document object)
       parameters:
         - name: appid
           in: path
@@ -85,13 +85,24 @@ paths:
               properties:
                 document:
                   type: object
-                  description: Document to chunk
+                  description: |
+                    Full document object to chunk. Must include all fields (e.g., id, title, content, category, doc_id, etc.), not just a document_id.
+                  example:
+                    id: testdoc1
+                    title: Test Policy
+                    content: All employees must comply with security policies. MFA is required for all logins.
+                    category: security
+                    doc_id: direct_0
                 chunker_type:
                   type: string
-                  description: Chunker type
+                  description: Chunker type (e.g., langchain)
+                  example: langchain
                 chunker_config:
                   type: object
-                  description: Chunker configuration
+                  description: Chunker configuration (e.g., chunk_size, chunk_overlap)
+                  example:
+                    chunk_size: 200
+                    chunk_overlap: 50
               required:
                 - document
       responses:
@@ -131,15 +142,18 @@ paths:
                   type: array
                   items:
                     type: string
-                  description: Texts to embed
-                embedder_type:
-                  type: string
-                  description: Embedder type
+                  description: |
+                    List of strings to embed. Do not pass chunk dicts—extract the 'chunk' field from each chunk and send as a list of strings.
+                  example:
+                    - "All employees must comply with security policies. MFA is required for all logins."
                 embedder_config:
                   type: object
                   description: Embedder configuration
+                  example: {}
               required:
                 - texts
+      description: |
+        The embedder_type is not user-supplied and always defaults to 'sentence_transformers'.
       responses:
         "200":
           description: Embedding result
@@ -163,17 +177,6 @@ paths:
       summary: Add vectors to vector DB for an application
       parameters:
         - name: appid
-          in: path
-          required: true
-          schema:
-            type: string
-          description: Application ID for scoping operations
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
               properties:
                 vectors:
                   type: array
@@ -181,21 +184,39 @@ paths:
                     type: array
                     items:
                       type: number
-                  description: Vectors to add
+                  description: |
+                    Vectors to add. Must be a non-empty list of embeddings. Do not call this endpoint if you have no embeddings to add.
+                  example:
+                    - [0.1, 0.2, 0.3, ...]
                 metadatas:
                   type: array
                   items:
                     type: object
                   description: Metadata for vectors
-                adapter_type:
-                  type: string
-                  description: Adapter type
+                  example:
+                    - { "text": "chunk text", "chunk_index": 0 }
                 adapter_config:
                   type: object
-                  description: Adapter configuration
+                  description: Adapter configuration (e.g., collection_name)
+                  example: { "collection_name": "my_collection" }
               required:
                 - vectors
                 - metadatas
+      description: |
+        Do not call this endpoint if the embeddings/vectors list is empty. The service will raise an error if vectors is [].
+        The adapter_type is not user-supplied and always defaults to 'chromadb'.
+                  type: string
+                  description: Adapter type
+                  example: chromadb
+                adapter_config:
+                  type: object
+                  description: Adapter configuration
+                  example: { "collection_name": "my_collection" }
+              required:
+                - vectors
+                - metadatas
+      description: |
+        Do not call this endpoint if the embeddings/vectors list is empty. The service will raise an error if vectors is [].
       responses:
         "200":
           description: Add vectors result
@@ -235,14 +256,13 @@ paths:
                 top_k:
                   type: integer
                   description: Number of results
-                adapter_type:
-                  type: string
-                  description: Adapter type
                 adapter_config:
                   type: object
-                  description: Adapter configuration
+                  description: Adapter configuration (e.g., collection_name)
               required:
                 - query_vector
+      description: |
+        The adapter_type is not user-supplied and always defaults to 'chromadb'.
       responses:
         "200":
           description: Query result
