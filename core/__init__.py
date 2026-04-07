@@ -12,7 +12,6 @@ from core.database_provider import DatabaseFactory
 # Import RAG provider (Phase 2)
 try:
     from core.rag_provider import RAGFactory
-    from core.chroma_provider import ChromaProvider  # This triggers registration
     RAG_AVAILABLE = True
 except ImportError:
     RAG_AVAILABLE = False

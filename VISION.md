@@ -149,7 +149,6 @@ adag scan ./infra/
 | Gap | Work |
 |---|---|
 | `core/rag_provider.py` is empty | Implement clean `RAGProvider` class wrapping the 5 REST endpoints |
-| `core/chroma_provider.py` is empty | Optional local ChromaDB fallback when microservices are offline |
 | No ingestion UX | Add `adag ingest ./docs/` CLI command or MCP `ingest_document` tool |
 | Single hardcoded `appid="archapp"` | Make configurable per project/team |
 
@@ -167,7 +166,6 @@ adag/                         ← Python package root
 ├── core/
 │   ├── graph.py              ← ✅ done
 │   ├── rag_provider.py       ← ⚠️  empty — REST client for RAG microservices
-│   ├── chroma_provider.py    ← ⚠️  empty — optional local fallback
 │   └── ...                   ← ✅ done
 ├── policies/                 ← ✅ 10 built-in policy docs
 └── scripts/
