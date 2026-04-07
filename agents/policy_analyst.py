@@ -4,10 +4,9 @@ Policy Analyst agent - Retrieves relevant policies via RAG.
 import os
 from typing import Dict, Any, List
 from core.state import AgentState
-import requests
-from rag_service_config import CONTEXT_AUG_URL, APPID
 from models.policy import Policy
 from models.violations import AuditStatus
+from core.policy_loader import load_policies_from_dir
 
 
 def policy_analyst_node(state: AgentState) -> Dict[str, Any]:
@@ -55,14 +54,23 @@ def policy_analyst_node(state: AgentState) -> Dict[str, Any]:
         use_rag = os.getenv("USE_RAG", "true").lower() == "true"
         
         if not use_rag:
+            # Offline mode: load policies directly from disk — no microservices needed.
+            # Respects POLICIES_DIR env var; falls back to built-in policies/ bundle.
+            policies_dir = os.getenv("POLICIES_DIR")
+            disk_policies = load_policies_from_dir(policies_dir)
             return {
-                "retrieved_policies": [],
+                "retrieved_policies": disk_policies,
                 "resource_types": resource_types,
                 "current_node": "policy_analyst",
-                "messages": ["[POLICY_ANALYST] RAG disabled, skipping policy retrieval"]
+                "messages": [
+                    f"[POLICY_ANALYST] RAG disabled — loaded {len(disk_policies)} policies from disk",
+                    f"[POLICY_ANALYST] Resource types: {', '.join(resource_types)}"
+                ]
             }
         
         # Call REST API for context augmentation
+        import requests
+        from rag_service_config import CONTEXT_AUG_URL, APPID
         endpoint = CONTEXT_AUG_URL.format(appid=APPID)
         payload = {
             "question": query,

@@ -134,14 +134,9 @@ class ADAGGraph:
         if state.get("status") == AuditStatus.ERROR:
             return "end"
         
-        # If no policies were retrieved, we can still continue to auditor
-        # (it will handle the fallback to hardcoded policies)
-        # But if explicitly disabled, end here
-        use_rag = os.getenv("USE_RAG", "true").lower() == "true"
-        if not use_rag and not state.get("retrieved_policies"):
-            return "end"
-        
-        # Otherwise, continue to auditor
+        # Always proceed to auditor — it handles both retrieved policies
+        # (RAG mode) and disk-loaded policies (offline mode), and has a
+        # hardcoded fallback prompt if neither is available.
         return "auditor"
     
     def invoke(self, iac_code: str, file_path: str, **kwargs):

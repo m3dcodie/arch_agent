@@ -164,3 +164,96 @@ class AuditResult(BaseModel):
     def low_severity_count(self) -> int:
         """Count of low severity violations"""
         return sum(1 for v in self.violations if v.severity == Severity.LOW)
+
+    def to_json(self) -> dict:
+        """Serialise the result to a plain dictionary (JSON-friendly)."""
+        return {
+            "status": self.status.value,
+            "file_path": self.file_path,
+            "total_resources": self.total_resources,
+            "summary": self.summary,
+            "violation_counts": {
+                "total": len(self.violations),
+                "high": self.high_severity_count,
+                "medium": self.medium_severity_count,
+                "low": self.low_severity_count,
+            },
+            "violations": [
+                {
+                    "id": v.id,
+                    "resource_type": v.resource_type,
+                    "resource_name": v.resource_name,
+                    "severity": v.severity.value,
+                    "policy_ref": v.policy_ref,
+                    "description": v.description,
+                    "line_number": v.line_number,
+                    "remediation_hint": v.remediation_hint,
+                }
+                for v in self.violations
+            ],
+        }
+
+    def to_sarif(self) -> dict:
+        """
+        Serialise the result to SARIF 2.1.0 format.
+
+        Compatible with GitHub Advanced Security code scanning upload:
+            github/codeql-action/upload-sarif
+        """
+        _level_map = {
+            Severity.HIGH: "error",
+            Severity.MEDIUM: "warning",
+            Severity.LOW: "note",
+            Severity.INFO: "note",
+        }
+
+        rules = [
+            {
+                "id": v.policy_ref,
+                "name": v.policy_ref.replace("_", " ").title(),
+                "shortDescription": {"text": v.description},
+                "helpUri": "https://github.com/your-org/adag/blob/main/policies/"
+                           + v.policy_ref + ".md",
+                "defaultConfiguration": {"level": _level_map.get(v.severity, "warning")},
+            }
+            for v in self.violations
+        ]
+
+        results = [
+            {
+                "ruleId": v.policy_ref,
+                "level": _level_map.get(v.severity, "warning"),
+                "message": {"text": v.description
+                            + (f" Fix: {v.remediation_hint}" if v.remediation_hint else "")},
+                "locations": [
+                    {
+                        "physicalLocation": {
+                            "artifactLocation": {
+                                "uri": self.file_path,
+                                "uriBaseId": "%SRCROOT%",
+                            },
+                            "region": {"startLine": v.line_number or 1},
+                        }
+                    }
+                ],
+            }
+            for v in self.violations
+        ]
+
+        return {
+            "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+            "version": "2.1.0",
+            "runs": [
+                {
+                    "tool": {
+                        "driver": {
+                            "name": "ADAG",
+                            "version": "0.1.0",
+                            "informationUri": "https://github.com/your-org/adag",
+                            "rules": rules,
+                        }
+                    },
+                    "results": results,
+                }
+            ],
+        }
