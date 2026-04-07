@@ -26,6 +26,9 @@ requests>=2.31.0
 # CLI
 click>=8.1.0
 
+# MCP Server (Mode 2)
+mcp>=1.0.0
+
 # Utilities
 typing-extensions==4.12.2
 

@@ -23,6 +23,7 @@ dependencies = [
     "typing-extensions>=4.12.2",
     "requests>=2.31.0",
     "click>=8.1.0",
+    "mcp>=1.0.0",
 ]
 
 [project.scripts]
