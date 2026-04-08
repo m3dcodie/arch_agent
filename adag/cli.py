@@ -13,9 +13,9 @@ import sys
 from pathlib import Path
 
 import click
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 
-load_dotenv()
+load_dotenv(find_dotenv(usecwd=True))
 
 
 @click.group()

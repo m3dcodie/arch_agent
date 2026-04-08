@@ -20,16 +20,10 @@ def _invoke_structured(llm: BaseChatModel, prompt: ChatPromptTemplate, inputs: d
     """
     Invoke the LLM and parse the result into a Pydantic model.
 
-    Uses with_structured_output for providers that support tool/function calling
-    (e.g. Bedrock). Falls back to plain invocation + JSON extraction for Ollama.
+    Tries with_structured_output first; if the provider doesn't support it
+    (e.g. Ollama, or HF router models), falls back to plain invoke + JSON extraction.
     """
-    try:
-        from langchain_ollama import ChatOllama
-        is_ollama = isinstance(llm, ChatOllama)
-    except ImportError:
-        is_ollama = False
-
-    if is_ollama:
+    def _plain_invoke():
         chain = prompt | llm
         response = chain.invoke(inputs)
         raw = response.content if hasattr(response, "content") else str(response)
@@ -39,9 +33,13 @@ def _invoke_structured(llm: BaseChatModel, prompt: ChatPromptTemplate, inputs: d
         if not match:
             raise ValueError(f"No JSON found in model output: {raw[:300]}")
         return schema(**json.loads(match.group()))
-    else:
+
+    # Try structured output first; fall back on any API/tool-call error
+    try:
         chain = prompt | llm.with_structured_output(schema)
         return chain.invoke(inputs)
+    except Exception:
+        return _plain_invoke()
 
 
 # Fallback prompt for when RAG is disabled or no policies retrieved
@@ -117,8 +115,9 @@ def auditor_node(state: AgentState, llm: BaseChatModel) -> Dict[str, Any]:
             prompt_text = _build_dynamic_prompt(parsed_resources, retrieved_policies)
             message_prefix = f"[AUDITOR] Auditing against {len(retrieved_policies)} retrieved policies"
         else:
-            # Fallback: Use hardcoded prompt (Phase 1 behavior)
-            prompt_text = FALLBACK_AUDITOR_PROMPT.format(resources_json=resources_json)
+            # Fallback: Use hardcoded prompt — pass raw template (with {{ }} escapes)
+            # directly to ChatPromptTemplate; don't pre-render via .format()
+            prompt_text = FALLBACK_AUDITOR_PROMPT
             message_prefix = "[AUDITOR] Using fallback policy (RAG disabled or no policies found)"
         
         # Create prompt

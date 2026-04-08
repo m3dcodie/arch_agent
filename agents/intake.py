@@ -18,31 +18,26 @@ def _invoke_structured(llm: BaseChatModel, prompt: ChatPromptTemplate, inputs: d
     """
     Invoke the LLM and parse the result into a Pydantic model.
 
-    Uses with_structured_output for providers that support tool/function calling
-    (e.g. Bedrock). Falls back to plain invocation + JSON extraction for Ollama,
-    which does not reliably support schema-enforced structured output.
+    Tries with_structured_output first; if the provider doesn't support it
+    (e.g. Ollama, or HF router models), falls back to plain invoke + JSON extraction.
     """
-    try:
-        from langchain_ollama import ChatOllama
-        is_ollama = isinstance(llm, ChatOllama)
-    except ImportError:
-        is_ollama = False
-
-    if is_ollama:
-        # Plain invocation — strip <think> blocks and parse JSON from text
+    def _plain_invoke():
         chain = prompt | llm
         response = chain.invoke(inputs)
         raw = response.content if hasattr(response, "content") else str(response)
-        # Remove reasoning blocks and markdown fences
         raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
         raw = re.sub(r"```(?:json)?", "", raw).strip()
         match = re.search(r"\{.*\}", raw, re.DOTALL)
         if not match:
             raise ValueError(f"No JSON found in model output: {raw[:300]}")
         return schema(**json.loads(match.group()))
-    else:
+
+    # Try structured output first; fall back on any API/tool-call error
+    try:
         chain = prompt | llm.with_structured_output(schema)
         return chain.invoke(inputs)
+    except Exception:
+        return _plain_invoke()
 
 
 INTAKE_PROMPT = """You are a Terraform code parser. Your task is to extract all database-related resources from the provided Terraform code.

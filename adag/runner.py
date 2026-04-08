@@ -53,7 +53,11 @@ class ADAGRunner:
         env_file: Optional[str] = None,
     ):
         # Load environment
-        load_dotenv(env_file) if env_file else load_dotenv()
+        if env_file:
+            load_dotenv(env_file)
+        else:
+            from dotenv import find_dotenv
+            load_dotenv(find_dotenv(usecwd=True))
 
         if not terraform_dir and not terraform_file:
             raise ValueError("Provide either terraform_dir or terraform_file")
