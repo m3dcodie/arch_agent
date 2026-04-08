@@ -16,6 +16,13 @@ try:
 except ImportError:
     OLLAMA_AVAILABLE = False
 
+# Import HuggingFace provider
+try:
+    from core.huggingface_provider import HuggingFaceProvider  # noqa: F401
+    HUGGINGFACE_AVAILABLE = True
+except ImportError:
+    HUGGINGFACE_AVAILABLE = False
+
 # Import RAG provider (Phase 2)
 try:
     from core.rag_provider import RAGFactory

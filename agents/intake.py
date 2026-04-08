@@ -2,12 +2,47 @@
 Intake agent - Parses Terraform/IaC code and extracts resource definitions.
 """
 import json
-from typing import Dict, Any
+import re
+from typing import Dict, Any, Type, TypeVar
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.language_models import BaseChatModel
+from pydantic import BaseModel
 
 from core.state import AgentState
 from models.violations import TerraformResource, ResourceList, AuditStatus
+
+T = TypeVar("T", bound=BaseModel)
+
+
+def _invoke_structured(llm: BaseChatModel, prompt: ChatPromptTemplate, inputs: dict, schema: Type[T]) -> T:
+    """
+    Invoke the LLM and parse the result into a Pydantic model.
+
+    Uses with_structured_output for providers that support tool/function calling
+    (e.g. Bedrock). Falls back to plain invocation + JSON extraction for Ollama,
+    which does not reliably support schema-enforced structured output.
+    """
+    try:
+        from langchain_ollama import ChatOllama
+        is_ollama = isinstance(llm, ChatOllama)
+    except ImportError:
+        is_ollama = False
+
+    if is_ollama:
+        # Plain invocation — strip <think> blocks and parse JSON from text
+        chain = prompt | llm
+        response = chain.invoke(inputs)
+        raw = response.content if hasattr(response, "content") else str(response)
+        # Remove reasoning blocks and markdown fences
+        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+        raw = re.sub(r"```(?:json)?", "", raw).strip()
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if not match:
+            raise ValueError(f"No JSON found in model output: {raw[:300]}")
+        return schema(**json.loads(match.group()))
+    else:
+        chain = prompt | llm.with_structured_output(schema)
+        return chain.invoke(inputs)
 
 
 INTAKE_PROMPT = """You are a Terraform code parser. Your task is to extract all database-related resources from the provided Terraform code.
@@ -58,18 +93,14 @@ def intake_node(state: AgentState, llm: BaseChatModel) -> Dict[str, Any]:
     try:
         # Create prompt
         prompt = ChatPromptTemplate.from_template(INTAKE_PROMPT)
+
+        # Invoke with provider-aware structured output
+        result = _invoke_structured(llm, prompt, {"iac_code": state["iac_code"]}, ResourceList)
         
-        # Use structured output with Pydantic model
-        structured_llm = llm.with_structured_output(ResourceList)
-        
-        # Create chain
-        chain = prompt | structured_llm
-        
-        # Invoke the chain
-        result = chain.invoke({"iac_code": state["iac_code"]})
-        
-        # Extract resources
-        parsed_resources = result.resources if result else []
+        # Extract resources — return as plain dicts so LangGraph's SQLite
+        # checkpointer can serialize them with json.dumps (Pydantic objects are not
+        # JSON-serializable by default in the checkpoint metadata path).
+        parsed_resources = [r.model_dump() for r in (result.resources if result else [])]
         
         return {
             "parsed_resources": parsed_resources,

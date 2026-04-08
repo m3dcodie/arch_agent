@@ -1,6 +1,7 @@
 """
 LangGraph workflow construction for the ADAG system.
 """
+import hashlib
 import os
 from typing import Optional
 from langgraph.graph import StateGraph, END
@@ -164,9 +165,12 @@ class ADAGGraph:
             "error_message": ""
         }
         
-        # Provide config with thread_id for checkpointing
+        # Provide config with thread_id for checkpointing.
+        # Use a unique thread_id per file so each scan starts fresh and
+        # stale checkpoints from previous runs don't interfere.
         if "config" not in kwargs:
-            kwargs["config"] = {"configurable": {"thread_id": "default"}}
+            thread_id = hashlib.md5(file_path.encode()).hexdigest()[:12]
+            kwargs["config"] = {"configurable": {"thread_id": thread_id}}
         
         return self.graph.invoke(initial_state, **kwargs)
     

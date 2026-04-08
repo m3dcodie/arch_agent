@@ -38,8 +38,11 @@ def policy_analyst_node(state: AgentState) -> Dict[str, Any]:
                 "messages": ["[POLICY_ANALYST] No resources to analyze"]
             }
         
-        # Extract unique resource types from parsed resources
-        resource_types = list(set([r.resource_type for r in parsed_resources]))
+        # Extract unique resource types — resources may be dicts (serialized for checkpoint)
+        resource_types = list(set(
+            r.get("resource_type", "") if isinstance(r, dict) else r.resource_type
+            for r in parsed_resources
+        ))
         
         # Build semantic query for RAG retrieval
         # Include resource types and general security/compliance terms
@@ -59,7 +62,7 @@ def policy_analyst_node(state: AgentState) -> Dict[str, Any]:
             policies_dir = os.getenv("POLICIES_DIR")
             disk_policies = load_policies_from_dir(policies_dir)
             return {
-                "retrieved_policies": disk_policies,
+                "retrieved_policies": [p.model_dump() for p in disk_policies],
                 "resource_types": resource_types,
                 "current_node": "policy_analyst",
                 "messages": [
@@ -113,7 +116,7 @@ def policy_analyst_node(state: AgentState) -> Dict[str, Any]:
             retrieved_policies.append(policy)
 
         return {
-            "retrieved_policies": retrieved_policies,
+            "retrieved_policies": [p.model_dump() for p in retrieved_policies],
             "resource_types": resource_types,
             "current_node": "policy_analyst",
             "messages": [

@@ -1,14 +1,47 @@
 """
 Auditor agent - Checks resources against retrieved policies (Phase 2: RAG-enabled).
 """
+import json
+import re
 import uuid
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Type, TypeVar
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.language_models import BaseChatModel
+from pydantic import BaseModel
 
 from core.state import AgentState
 from models.violations import Violation, ViolationList, Severity, AuditStatus, TerraformResource
 from models.policy import Policy
+
+T = TypeVar("T", bound=BaseModel)
+
+
+def _invoke_structured(llm: BaseChatModel, prompt: ChatPromptTemplate, inputs: dict, schema: Type[T]) -> T:
+    """
+    Invoke the LLM and parse the result into a Pydantic model.
+
+    Uses with_structured_output for providers that support tool/function calling
+    (e.g. Bedrock). Falls back to plain invocation + JSON extraction for Ollama.
+    """
+    try:
+        from langchain_ollama import ChatOllama
+        is_ollama = isinstance(llm, ChatOllama)
+    except ImportError:
+        is_ollama = False
+
+    if is_ollama:
+        chain = prompt | llm
+        response = chain.invoke(inputs)
+        raw = response.content if hasattr(response, "content") else str(response)
+        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
+        raw = re.sub(r"```(?:json)?", "", raw).strip()
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if not match:
+            raise ValueError(f"No JSON found in model output: {raw[:300]}")
+        return schema(**json.loads(match.group()))
+    else:
+        chain = prompt | llm.with_structured_output(schema)
+        return chain.invoke(inputs)
 
 
 # Fallback prompt for when RAG is disabled or no policies retrieved
@@ -90,18 +123,9 @@ def auditor_node(state: AgentState, llm: BaseChatModel) -> Dict[str, Any]:
         
         # Create prompt
         prompt = ChatPromptTemplate.from_template(prompt_text)
-        
-        # Use structured output with Pydantic model
-        structured_llm = llm.with_structured_output(ViolationList)
-        
-        # Create chain
-        chain = prompt | structured_llm
-        
-        # Invoke the chain
-        if retrieved_policies:
-            result = chain.invoke({"resources_json": resources_json})
-        else:
-            result = chain.invoke({"resources_json": resources_json})
+
+        # Invoke with provider-aware structured output
+        result = _invoke_structured(llm, prompt, {"resources_json": resources_json}, ViolationList)
         
         # Extract violations
         violations = result.violations if result else []
@@ -120,7 +144,7 @@ def auditor_node(state: AgentState, llm: BaseChatModel) -> Dict[str, Any]:
             message = "[AUDITOR] All resources are compliant"
         
         return {
-            "violations": violations,
+            "violations": [v.model_dump() if hasattr(v, "model_dump") else v for v in violations],
             "current_node": "auditor",
             "status": status,
             "messages": [message_prefix, message]
@@ -159,18 +183,41 @@ Your task is to audit the provided Terraform resources against the following pol
     prompt += "=" * 80 + "\n\n"
     
     for i, policy in enumerate(policies, 1):
-        prompt += f"### Policy {i}: {policy.title}\n"
-        prompt += f"**Policy ID:** `{policy.id}`\n"
-        prompt += f"**Severity:** {policy.severity}\n"
-        prompt += f"**Description:** {policy.description}\n\n"
-        
+        # Policy may be a dict (serialized for checkpoint) or a Pydantic object
+        if isinstance(policy, dict):
+            title = policy.get("title", "Unknown")
+            pol_id = policy.get("id", "unknown")
+            severity = policy.get("severity", "MEDIUM")
+            description = policy.get("description", "")
+            requirements = policy.get("requirements", "")
+            remediation = policy.get("remediation", "")
+        else:
+            title = policy.title
+            pol_id = policy.id
+            severity = policy.severity
+            description = policy.description
+            requirements = policy.requirements
+            remediation = policy.remediation
+
+        # Escape braces in policy content so ChatPromptTemplate doesn't treat
+        # {something} in policy text as template variables.
+        description = description.replace("{", "{{").replace("}", "}}")
+        requirements = requirements.replace("{", "{{").replace("}", "}}")
+        if remediation:
+            remediation = remediation.replace("{", "{{").replace("}", "}}")
+
+        prompt += f"### Policy {i}: {title}\n"
+        prompt += f"**Policy ID:** `{pol_id}`\n"
+        prompt += f"**Severity:** {severity}\n"
+        prompt += f"**Description:** {description}\n\n"
+
         # Include requirements (truncated if too long)
-        requirements = policy.requirements[:1000] if len(policy.requirements) > 1000 else policy.requirements
+        requirements = requirements[:1000] if len(requirements) > 1000 else requirements
         prompt += f"**Requirements:**\n{requirements}\n\n"
-        
-        if policy.remediation:
-            prompt += f"**Remediation:** {policy.remediation}\n\n"
-        
+
+        if remediation:
+            prompt += f"**Remediation:** {remediation}\n\n"
+
         prompt += "-" * 80 + "\n\n"
     
     # Add resources section
@@ -215,15 +262,21 @@ Be thorough: check each resource against each applicable policy.
 
 
 def _format_resources_for_prompt(resources: List[TerraformResource]) -> str:
-    """Format resources as JSON string for the prompt"""
+    """Format resources as JSON string for the prompt.
+
+    Accepts either TerraformResource objects or plain dicts (from checkpoint).
+    """
     resources_data = []
     for resource in resources:
-        resources_data.append({
-            "resource_type": resource.resource_type,
-            "resource_name": resource.resource_name,
-            "attributes": resource.attributes,
-            "line_number": resource.line_number
-        })
-    
+        if isinstance(resource, dict):
+            resources_data.append(resource)
+        else:
+            resources_data.append({
+                "resource_type": resource.resource_type,
+                "resource_name": resource.resource_name,
+                "attributes": resource.attributes,
+                "line_number": resource.line_number
+            })
+
     import json
     return json.dumps(resources_data, indent=2)

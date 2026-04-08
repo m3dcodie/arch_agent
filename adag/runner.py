@@ -82,8 +82,9 @@ class ADAGRunner:
         _llm = (llm_provider or os.getenv("LLM_PROVIDER", "bedrock")).lower()
         if _llm == "bedrock":
             import core.bedrock_provider  # noqa: F401
-        import core.ollama_provider   # noqa: F401
-        import core.sqlite_provider   # noqa: F401
+        import core.ollama_provider       # noqa: F401
+        import core.huggingface_provider  # noqa: F401
+        import core.sqlite_provider       # noqa: F401
 
         # Lazy-initialise the graph on first scan()
         self._graph = None
