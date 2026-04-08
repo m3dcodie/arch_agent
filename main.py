@@ -123,7 +123,10 @@ def main():
     print("Initializing ADAG system...")
     try:
         # Import providers to register them
-        import core.bedrock_provider
+        # Only import bedrock if needed — boto3 credential lookup hangs without AWS config
+        if os.getenv("LLM_PROVIDER", "bedrock").lower() == "bedrock":
+            import core.bedrock_provider
+        import core.ollama_provider
         import core.sqlite_provider
         
         graph = create_graph()

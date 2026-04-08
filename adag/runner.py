@@ -77,7 +77,12 @@ class ADAGRunner:
             os.environ["POLICIES_DIR"] = str(policies_dir)
 
         # Register providers (trigger their @register decorators)
-        import core.bedrock_provider  # noqa: F401
+        # Only import bedrock if it will be used — boto3 credential lookup
+        # can hang when no AWS config is present.
+        _llm = (llm_provider or os.getenv("LLM_PROVIDER", "bedrock")).lower()
+        if _llm == "bedrock":
+            import core.bedrock_provider  # noqa: F401
+        import core.ollama_provider   # noqa: F401
         import core.sqlite_provider   # noqa: F401
 
         # Lazy-initialise the graph on first scan()

@@ -8,6 +8,7 @@ Usage:
     adag scan ./infra/ --format sarif > results.sarif.json
 """
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -78,7 +79,7 @@ def scan(path, policies_dir, llm_provider, output_format, no_rag, quiet):
             terraform_file=str(path_obj) if path_obj.is_file() else None,
             policies_dir=policies_dir,
             llm_provider=llm_provider,
-            use_rag=(not no_rag),
+            use_rag=False if no_rag else (os.getenv("USE_RAG", "true").lower() == "true"),
         )
     except Exception as e:
         click.echo(f"Error initialising ADAG: {e}", err=True)

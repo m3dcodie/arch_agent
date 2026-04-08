@@ -9,6 +9,13 @@ database providers, and RAG providers.
 from core.llm_provider import LLMFactory
 from core.database_provider import DatabaseFactory
 
+# Import Ollama provider (local testing)
+try:
+    from core.ollama_provider import OllamaProvider  # noqa: F401 — registers on import
+    OLLAMA_AVAILABLE = True
+except ImportError:
+    OLLAMA_AVAILABLE = False
+
 # Import RAG provider (Phase 2)
 try:
     from core.rag_provider import RAGFactory

@@ -1,5 +1,8 @@
 # Core LangGraph and LangChain
 langgraph==0.2.45
+
+# Ollama (local model testing)
+langchain-ollama>=0.2.0
 langgraph-checkpoint-sqlite>=1.0.0
 langchain-core==0.3.15
 langchain-aws==0.2.6
