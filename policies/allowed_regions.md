@@ -37,6 +37,25 @@ This policy applies to ALL AWS resources across all services.
 - `eu-west-1` (Europe)
 - `ap-southeast-1` (Asia Pacific)
 
+## Enforcement: Canonical Approved Region List
+
+The following regions are the **only** approved regions for this organisation.
+Any region NOT in this list is a **MEDIUM** severity violation:
+
+```
+us-east-1
+us-east-2
+us-west-1
+us-west-2
+eu-west-1
+eu-west-2
+eu-central-1
+ap-southeast-1
+ap-southeast-2
+```
+
+If a `provider` block specifies a `region` that is not in the list above, it MUST be flagged as a violation.
+
 ## Rationale
 Region restrictions are critical for:
 1. **Data Sovereignty:** Comply with GDPR, CCPA, and other data residency laws

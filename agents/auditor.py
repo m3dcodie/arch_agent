@@ -3,6 +3,7 @@ Auditor agent - Checks resources against retrieved policies (Phase 2: RAG-enable
 """
 import json
 import re
+import time
 import uuid
 from typing import Dict, Any, List, Type, TypeVar
 from langchain_core.prompts import ChatPromptTemplate
@@ -15,6 +16,13 @@ from models.policy import Policy
 
 T = TypeVar("T", bound=BaseModel)
 
+_RATE_LIMIT_SIGNALS = ("429", "rate limit", "too many requests", "ratelimit")
+
+
+def _is_rate_limit(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(s in msg for s in _RATE_LIMIT_SIGNALS)
+
 
 def _invoke_structured(llm: BaseChatModel, prompt: ChatPromptTemplate, inputs: dict, schema: Type[T]) -> T:
     """
@@ -22,6 +30,7 @@ def _invoke_structured(llm: BaseChatModel, prompt: ChatPromptTemplate, inputs: d
 
     Tries with_structured_output first; if the provider doesn't support it
     (e.g. Ollama, or HF router models), falls back to plain invoke + JSON extraction.
+    Retries up to 3 times with exponential backoff on rate-limit (429) errors.
     """
     def _plain_invoke():
         chain = prompt | llm
@@ -34,12 +43,30 @@ def _invoke_structured(llm: BaseChatModel, prompt: ChatPromptTemplate, inputs: d
             raise ValueError(f"No JSON found in model output: {raw[:300]}")
         return schema(**json.loads(match.group()))
 
-    # Try structured output first; fall back on any API/tool-call error
-    try:
-        chain = prompt | llm.with_structured_output(schema)
-        return chain.invoke(inputs)
-    except Exception:
-        return _plain_invoke()
+    last_exc: Exception = RuntimeError("No attempts made")
+    for attempt in range(3):
+        try:
+            chain = prompt | llm.with_structured_output(schema)
+            return chain.invoke(inputs)
+        except Exception as exc:
+            if _is_rate_limit(exc):
+                wait = 15 * (2 ** attempt)  # 15s, 30s, 60s
+                print(f"[AUDITOR] Rate limited — retrying in {wait}s (attempt {attempt + 1}/3)")
+                time.sleep(wait)
+                last_exc = exc
+                continue
+            # Non-rate-limit error: fall back to plain invoke immediately
+            try:
+                return _plain_invoke()
+            except Exception as plain_exc:
+                if _is_rate_limit(plain_exc):
+                    wait = 15 * (2 ** attempt)
+                    print(f"[AUDITOR] Rate limited (plain) — retrying in {wait}s")
+                    time.sleep(wait)
+                    last_exc = plain_exc
+                    continue
+                raise plain_exc
+    raise last_exc
 
 
 # Fallback prompt for when RAG is disabled or no policies retrieved

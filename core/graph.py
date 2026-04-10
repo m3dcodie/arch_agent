@@ -1,8 +1,8 @@
 """
 LangGraph workflow construction for the ADAG system.
 """
-import hashlib
 import os
+import uuid
 from typing import Optional
 from langgraph.graph import StateGraph, END
 from langchain_core.language_models import BaseChatModel
@@ -45,13 +45,38 @@ class ADAGGraph:
         # Create providers
         self.llm_provider = LLMFactory.create_provider(self.llm_provider_name)
         self.db_provider = DatabaseFactory.create_provider(self.db_provider_name)
-        
-        # Get LLM model
-        self.llm = self.llm_provider.get_model()
-        
+
+        # Get per-agent LLM instances.
+        # INTAKE_MODEL / AUDITOR_MODEL env vars allow per-role model selection
+        # (supported by HuggingFace and Ollama providers; Bedrock uses its own
+        # ANTHROPIC_MODEL env var and ignores these overrides).
+        self.intake_llm = self._get_llm_for_role("INTAKE")
+        self.auditor_llm = self._get_llm_for_role("AUDITOR")
+
         # Build the graph
         self.graph = self._build_graph()
     
+    def _get_llm_for_role(self, role: str) -> BaseChatModel:
+        """
+        Return an LLM instance for a specific agent role.
+
+        Reads ``<ROLE>_MODEL`` from the environment (e.g. ``INTAKE_MODEL``,
+        ``AUDITOR_MODEL``).  When set and the active provider is not Bedrock
+        (which uses its own model-ID env vars), the override model name is
+        forwarded to ``get_model(model=...)``.  Falls back to the provider
+        default when the env var is absent or the provider is Bedrock.
+
+        Args:
+            role: Upper-case role name, e.g. ``"INTAKE"`` or ``"AUDITOR"``.
+
+        Returns:
+            BaseChatModel: Configured LLM instance for this role.
+        """
+        override = os.getenv(f"{role}_MODEL")
+        if override and self.llm_provider_name != "bedrock":
+            return self.llm_provider.get_model(model=override)
+        return self.llm_provider.get_model()
+
     def _build_graph(self):
         """
         Build the LangGraph workflow.
@@ -65,10 +90,10 @@ class ADAGGraph:
         # Create the state graph
         workflow = StateGraph(AgentState)
         
-        # Add nodes with LLM binding
-        workflow.add_node("intake", lambda state: intake_node(state, self.llm))
+        # Add nodes with per-agent LLM binding
+        workflow.add_node("intake", lambda state: intake_node(state, self.intake_llm))
         workflow.add_node("policy_analyst", lambda state: policy_analyst_node(state))
-        workflow.add_node("auditor", lambda state: auditor_node(state, self.llm))
+        workflow.add_node("auditor", lambda state: auditor_node(state, self.auditor_llm))
         
         # Define the flow
         workflow.set_entry_point("intake")
@@ -165,12 +190,10 @@ class ADAGGraph:
             "error_message": ""
         }
         
-        # Provide config with thread_id for checkpointing.
-        # Use a unique thread_id per file so each scan starts fresh and
-        # stale checkpoints from previous runs don't interfere.
+        # Each scan gets a fresh UUID thread_id so LangGraph never resumes
+        # from a stale checkpoint written by a previous (possibly failed) run.
         if "config" not in kwargs:
-            thread_id = hashlib.md5(file_path.encode()).hexdigest()[:12]
-            kwargs["config"] = {"configurable": {"thread_id": thread_id}}
+            kwargs["config"] = {"configurable": {"thread_id": str(uuid.uuid4())}}
         
         return self.graph.invoke(initial_state, **kwargs)
     

@@ -120,8 +120,7 @@ class TestIntakeAgent:
         """Test intake agent with mocked LLM"""
         from agents.intake import intake_node
         from core.state import AgentState
-        
-        # Mock the structured output
+
         mock_result = ResourceList(
             resources=[
                 TerraformResource(
@@ -132,18 +131,9 @@ class TestIntakeAgent:
                 )
             ]
         )
-        
-        # Create a mock that properly returns the chain
-        def mock_with_structured_output(schema):
-            mock_chain = MagicMock()
-            mock_chain.invoke = MagicMock(return_value=mock_result)
-            return mock_chain
-        
-        mock_llm.with_structured_output = mock_with_structured_output
-        
-        # Create initial state
+
         state = {
-            "iac_code": "resource \"aws_db_instance\" \"main\" {}",
+            "iac_code": 'resource "aws_db_instance" "main" {}',
             "file_path": "test.tf",
             "messages": [],
             "parsed_resources": [],
@@ -154,14 +144,14 @@ class TestIntakeAgent:
             "current_node": "",
             "error_message": ""
         }
-        
-        # Run intake
-        result = intake_node(state, mock_llm)
-        
+
+        with patch("agents.intake._invoke_structured", return_value=mock_result):
+            result = intake_node(state, mock_llm)
+
         assert result["current_node"] == "intake"
         assert result["status"] == AuditStatus.IN_PROGRESS
         assert len(result["parsed_resources"]) == 1
-        assert result["parsed_resources"][0].resource_type == "aws_db_instance"
+        assert result["parsed_resources"][0]["resource_type"] == "aws_db_instance"
 
 
 class TestAuditorAgent:
@@ -170,8 +160,7 @@ class TestAuditorAgent:
     def test_auditor_with_violations(self, mock_llm):
         """Test auditor detects violations"""
         from agents.auditor import auditor_node
-        
-        # Mock the structured output with violations
+
         mock_result = ViolationList(
             violations=[
                 Violation(
@@ -185,16 +174,7 @@ class TestAuditorAgent:
                 )
             ]
         )
-        
-        # Create a mock that properly returns the chain
-        def mock_with_structured_output(schema):
-            mock_chain = MagicMock()
-            mock_chain.invoke = MagicMock(return_value=mock_result)
-            return mock_chain
-        
-        mock_llm.with_structured_output = mock_with_structured_output
-        
-        # Create state with parsed resources
+
         state = {
             "iac_code": "",
             "file_path": "test.tf",
@@ -214,31 +194,21 @@ class TestAuditorAgent:
             "current_node": "intake",
             "error_message": ""
         }
-        
-        # Run auditor
-        result = auditor_node(state, mock_llm)
-        
+
+        with patch("agents.auditor._invoke_structured", return_value=mock_result):
+            result = auditor_node(state, mock_llm)
+
         assert result["current_node"] == "auditor"
         assert result["status"] == AuditStatus.FAILED
         assert len(result["violations"]) == 1
-        assert result["violations"][0].severity == Severity.HIGH
+        assert result["violations"][0]["severity"] == Severity.HIGH
     
     def test_auditor_no_violations(self, mock_llm):
         """Test auditor passes compliant resources"""
         from agents.auditor import auditor_node
-        
-        # Mock the structured output with no violations
+
         mock_result = ViolationList(violations=[])
-        
-        # Create a mock that properly returns the chain
-        def mock_with_structured_output(schema):
-            mock_chain = MagicMock()
-            mock_chain.invoke = MagicMock(return_value=mock_result)
-            return mock_chain
-        
-        mock_llm.with_structured_output = mock_with_structured_output
-        
-        # Create state with compliant resources
+
         state = {
             "iac_code": "",
             "file_path": "test.tf",
@@ -258,10 +228,10 @@ class TestAuditorAgent:
             "current_node": "intake",
             "error_message": ""
         }
-        
-        # Run auditor
-        result = auditor_node(state, mock_llm)
-        
+
+        with patch("agents.auditor._invoke_structured", return_value=mock_result):
+            result = auditor_node(state, mock_llm)
+
         assert result["current_node"] == "auditor"
         assert result["status"] == AuditStatus.PASSED
         assert len(result["violations"]) == 0
