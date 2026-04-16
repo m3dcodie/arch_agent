@@ -7,54 +7,44 @@ ADAG without separate cloud credentials.
 
 Authentication
 --------------
-GitHub Copilot issues short-lived *copilot tokens* (TTL ~30 min) that are
-obtained by exchanging a long-lived OAuth token.  Two auth sources are supported,
-tried in priority order:
+The OAuth token from ``gh auth login`` is used directly as the Bearer token
+against ``api.githubcopilot.com`` — no internal token exchange is required.
 
-1. ``GITHUB_COPILOT_TOKEN`` env var — a pre-obtained OAuth token (e.g. from
-   ``gh auth token`` or a GitHub App).
-2. ``~/.config/github-copilot/hosts.json`` — written by the ``gh`` CLI and the
-   VS Code / JetBrains Copilot extension.  The file has the shape::
+Two token sources are supported, tried in priority order:
 
-       {"github.com": {"oauth_token": "ghu_..."}}
+1. ``GITHUB_COPILOT_TOKEN`` env var — set this to the output of::
 
-The OAuth token is exchanged for a copilot token once at startup (and again on
-each ``get_model()`` call, since tokens are short-lived).
+       gh auth status --show-token
+
+2. ``~/.config/gh/hosts.yml`` — written by the ``gh`` CLI automatically.
 
 Endpoint and models
 -------------------
 Base URL : https://api.githubcopilot.com
-Default model : ``gpt-4o`` (available on all Copilot plans)
+Default model : ``claude-sonnet-4.5``
 
-Other usable model IDs (subject to your plan):
-  - ``gpt-4o``
-  - ``gpt-4.1``
-  - ``o3``
-  - ``o4-mini``
-  - ``claude-sonnet-4-5``   (Pro+ / Enterprise)
-  - ``claude-sonnet-4``     (Pro+ / Enterprise)
-  - ``gemini-2.0-flash``    (Pro+ / Enterprise)
+Available model IDs (run ``adag models`` or check the API)::
 
-Run ``/models`` in OpenCode or call ``list_copilot_models()`` below to get the
-live list from the API.
+    gpt-4.1               gpt-4.1-2025-04-14
+    gpt-4o-mini           gpt-4o-mini-2024-07-18
+    claude-sonnet-4       claude-sonnet-4.5
+    claude-haiku-4.5      claude-opus-4.5
 
 Usage
 -----
 In ``.env``::
 
     LLM_PROVIDER=github-copilot
-    GITHUB_COPILOT_TOKEN=ghu_your_oauth_token_here
-    # Optional overrides:
-    GITHUB_COPILOT_MODEL=gpt-4o
-    GITHUB_COPILOT_TEMPERATURE=0.1
-    GITHUB_COPILOT_MAX_TOKENS=4096
+    GITHUB_COPILOT_TOKEN=gho_your_token_here
+    GITHUB_COPILOT_MODEL=claude-sonnet-4.5
+    INTAKE_MODEL=gpt-4.1
+    AUDITOR_MODEL=claude-sonnet-4.5
 """
 
 from __future__ import annotations
 
 import json
 import os
-import time
 from pathlib import Path
 from typing import Optional
 
@@ -69,13 +59,18 @@ from core.llm_provider import LLMProvider, LLMFactory
 # ---------------------------------------------------------------------------
 
 COPILOT_BASE_URL = "https://api.githubcopilot.com"
-_TOKEN_EXCHANGE_URL = "https://api.github.com/copilot_internal/v2/token"
 
-# Hosts file written by `gh` CLI / Copilot extensions
-_HOSTS_FILE = Path.home() / ".config" / "github-copilot" / "hosts.json"
+# gh CLI hosts file (written by `gh auth login`)
+_GH_HOSTS_FILE = Path.home() / ".config" / "gh" / "hosts.yml"
 
-# Copilot tokens have a ~30-minute TTL; refresh with a 5-minute safety margin.
-_TOKEN_TTL_SECONDS = 25 * 60
+# Legacy Copilot extension hosts file
+_COPILOT_HOSTS_FILE = Path.home() / ".config" / "github-copilot" / "hosts.json"
+
+_REQUIRED_HEADERS = {
+    "Editor-Version": "vscode/1.99.0",
+    "Editor-Plugin-Version": "copilot-chat/0.26.0",
+    "Copilot-Integration-Id": "vscode-chat",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -85,85 +80,75 @@ _TOKEN_TTL_SECONDS = 25 * 60
 
 def _resolve_oauth_token() -> str:
     """
-    Return the GitHub OAuth token, trying env var first, then hosts.json.
+    Return the GitHub OAuth token, trying env var first, then gh CLI hosts file.
 
     Raises:
         ValueError: If no token source is found.
     """
-    # 1. Explicit env var
+    # 1. Explicit env var (highest priority)
     token = os.getenv("GITHUB_COPILOT_TOKEN", "").strip()
     if token:
         return token
 
-    # 2. gh CLI / VS Code extension hosts file
-    if _HOSTS_FILE.exists():
+    # 2. gh CLI hosts.yml  (written by `gh auth login`)
+    if _GH_HOSTS_FILE.exists():
         try:
-            data = json.loads(_HOSTS_FILE.read_text())
-            token = data.get("github.com", {}).get("oauth_token", "") or data.get(
-                "github.com", {}
-            ).get("user", {}).get("oauth_token", "")
+            import yaml  # optional dep — only needed if env var not set
+
+            data = yaml.safe_load(_GH_HOSTS_FILE.read_text()) or {}
+            token = data.get("github.com", {}).get("oauth_token", "")
             if token:
                 return token
-        except (json.JSONDecodeError, AttributeError):
+        except Exception:
+            pass
+
+    # 3. Legacy Copilot extension hosts.json
+    if _COPILOT_HOSTS_FILE.exists():
+        try:
+            data = json.loads(_COPILOT_HOSTS_FILE.read_text())
+            token = data.get("github.com", {}).get("oauth_token", "")
+            if token:
+                return token
+        except Exception:
             pass
 
     raise ValueError(
-        "No GitHub Copilot OAuth token found.\n"
-        "Supply one via the GITHUB_COPILOT_TOKEN environment variable, "
-        "or authenticate with the GitHub CLI:\n"
+        "No GitHub Copilot token found.\n"
+        "Run the following and add the token to your .env:\n"
         "  gh auth login --scopes 'copilot'\n"
-        "  export GITHUB_COPILOT_TOKEN=$(gh auth token)"
+        "  gh auth status --show-token\n"
+        "Then set: GITHUB_COPILOT_TOKEN=<token>"
     )
 
 
 # ---------------------------------------------------------------------------
-# Helper: exchange OAuth token for a short-lived copilot token
+# Helper: validate the token works against the Copilot API
 # ---------------------------------------------------------------------------
 
 
-def _exchange_for_copilot_token(oauth_token: str) -> tuple[str, float]:
+def _validate_token(token: str) -> None:
     """
-    Exchange a GitHub OAuth token for a short-lived Copilot API token.
-
-    Returns:
-        (copilot_token, expiry_timestamp)
+    Hit the /models endpoint to confirm the token is accepted.
 
     Raises:
-        ValueError: On HTTP or JSON errors.
+        ValueError: On auth failure or connectivity error.
     """
     headers = {
-        "Authorization": f"token {oauth_token}",
+        "Authorization": f"Bearer {token}",
         "Accept": "application/json",
-        "Editor-Version": "adag/0.1.0",
-        "Copilot-Integration-Id": "vscode-chat",
+        **_REQUIRED_HEADERS,
     }
     try:
-        resp = requests.get(_TOKEN_EXCHANGE_URL, headers=headers, timeout=10)
+        resp = requests.get(f"{COPILOT_BASE_URL}/models", headers=headers, timeout=10)
+        if resp.status_code == 401:
+            raise ValueError(
+                "GitHub Copilot token is invalid or expired.\n"
+                "Run: gh auth login --scopes 'copilot' && gh auth status --show-token\n"
+                "Then update GITHUB_COPILOT_TOKEN in your .env"
+            )
         resp.raise_for_status()
-    except requests.exceptions.HTTPError as exc:
-        raise ValueError(
-            f"GitHub Copilot token exchange failed ({exc.response.status_code}): "
-            f"{exc.response.text}"
-        ) from exc
     except requests.exceptions.RequestException as exc:
-        raise ValueError(
-            f"GitHub Copilot token exchange request failed: {exc}"
-        ) from exc
-
-    data = resp.json()
-    copilot_token: str = data.get("token", "")
-    if not copilot_token:
-        raise ValueError(f"Unexpected response from Copilot token endpoint: {data}")
-
-    # The API returns expires_at as a Unix timestamp (int) in some versions
-    # and as an ISO-8601 string in others.  Normalise to float epoch seconds.
-    expires_raw = data.get("expires_at")
-    if isinstance(expires_raw, (int, float)):
-        expiry = float(expires_raw)
-    else:
-        expiry = time.time() + _TOKEN_TTL_SECONDS
-
-    return copilot_token, expiry
+        raise ValueError(f"GitHub Copilot API unreachable: {exc}") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -175,11 +160,11 @@ class GitHubCopilotProvider(LLMProvider):
     """
     GitHub Copilot LLM provider.
 
-    Wraps the Copilot API (OpenAI-compatible) so any Copilot subscriber can
-    use ADAG without additional cloud credentials or API keys.
+    Uses the OAuth token directly as a Bearer token against the Copilot API
+    (OpenAI-compatible). No internal token exchange required.
     """
 
-    DEFAULT_MODEL = "gpt-4o"
+    DEFAULT_MODEL = "claude-sonnet-4.5"
 
     def __init__(
         self,
@@ -192,26 +177,10 @@ class GitHubCopilotProvider(LLMProvider):
         self.max_tokens = int(os.getenv("GITHUB_COPILOT_MAX_TOKENS", "4096"))
         self.extra_kwargs = kwargs
 
-        # Resolve OAuth token eagerly so misconfiguration is caught at startup
-        self._oauth_token: str = oauth_token or _resolve_oauth_token()
-
-        # Copilot token cache (token, expiry epoch)
-        self._copilot_token: str = ""
-        self._copilot_token_expiry: float = 0.0
+        # Resolve token eagerly — fail fast on misconfiguration
+        self._token: str = oauth_token or _resolve_oauth_token()
 
         self.validate_config()
-
-    # ------------------------------------------------------------------
-    # Internal: token management
-    # ------------------------------------------------------------------
-
-    def _get_copilot_token(self) -> str:
-        """Return a valid (non-expired) Copilot token, refreshing if needed."""
-        if time.time() >= self._copilot_token_expiry - 60:
-            self._copilot_token, self._copilot_token_expiry = (
-                _exchange_for_copilot_token(self._oauth_token)
-            )
-        return self._copilot_token
 
     # ------------------------------------------------------------------
     # LLMProvider interface
@@ -221,29 +190,18 @@ class GitHubCopilotProvider(LLMProvider):
         """
         Return a ChatOpenAI instance pointing at the Copilot API.
 
-        A fresh copilot token is obtained (or reused if still valid) on every
-        call, so long-running processes automatically handle token rotation.
-
         ``model`` in kwargs (forwarded by graph._get_llm_for_role when
         INTAKE_MODEL / AUDITOR_MODEL env vars are set) overrides the provider
-        default, enabling per-agent model selection exactly as with the
-        HuggingFace and Ollama providers.
+        default, enabling per-agent model selection.
         """
-        copilot_token = self._get_copilot_token()
-
-        # Required Copilot headers — merged first so caller-supplied
-        # default_headers cannot accidentally drop them.
-        required_headers = {
-            "Editor-Version": "adag/0.1.0",
-            "Copilot-Integration-Id": "vscode-chat",
-            "X-GitHub-Api-Version": "2025-04-01",
-        }
+        # Required Copilot headers — caller headers are merged in but cannot
+        # override the required ones.
         caller_headers = kwargs.pop("default_headers", {})
-        merged_headers = {**required_headers, **caller_headers}
+        merged_headers = {**_REQUIRED_HEADERS, **caller_headers}
 
         config = {
-            "model": self.model,  # provider default; overridden below if caller passes model=
-            "openai_api_key": copilot_token,
+            "model": self.model,  # overridden by model= kwarg below if set
+            "openai_api_key": self._token,
             "openai_api_base": COPILOT_BASE_URL,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
@@ -258,13 +216,12 @@ class GitHubCopilotProvider(LLMProvider):
 
     def validate_config(self) -> bool:
         """
-        Validate that an OAuth token exists and the Copilot token exchange works.
+        Validate the token against the Copilot API.
 
         Raises:
-            ValueError: If the token is missing or the exchange fails.
+            ValueError: If the token is missing or rejected.
         """
-        # Trigger a token exchange to validate credentials at startup
-        self._get_copilot_token()
+        _validate_token(self._token)
         return True
 
 
