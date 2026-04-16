@@ -1,6 +1,7 @@
 """
 Unit tests for the ADAG system.
 """
+
 import pytest
 from pathlib import Path
 
@@ -9,8 +10,12 @@ from unittest.mock import Mock, MagicMock, patch
 from langchain_core.messages import AIMessage
 
 from models.violations import (
-    Violation, Severity, AuditStatus, 
-    TerraformResource, ResourceList, ViolationList
+    Violation,
+    Severity,
+    AuditStatus,
+    TerraformResource,
+    ResourceList,
+    ViolationList,
 )
 
 
@@ -37,7 +42,7 @@ def good_terraform_code():
 
 class TestModels:
     """Test Pydantic models"""
-    
+
     def test_violation_model(self):
         """Test Violation model creation"""
         violation = Violation(
@@ -46,30 +51,30 @@ class TestModels:
             resource_name="main",
             severity=Severity.HIGH,
             policy_ref="delete_protection",
-            description="Missing deletion protection"
+            description="Missing deletion protection",
         )
-        
+
         assert violation.id == "V001"
         assert violation.severity == Severity.HIGH
         assert violation.resource_type == "aws_db_instance"
-    
+
     def test_terraform_resource_model(self):
         """Test TerraformResource model creation"""
         resource = TerraformResource(
             resource_type="aws_db_instance",
             resource_name="main",
             attributes={"engine": "postgres", "deletion_protection": True},
-            line_number=10
+            line_number=10,
         )
-        
+
         assert resource.resource_type == "aws_db_instance"
         assert resource.attributes["deletion_protection"] is True
-    
+
     def test_violation_list_model(self):
         """Test ViolationList model"""
         violations = ViolationList(violations=[])
         assert len(violations.violations) == 0
-        
+
         violations.violations.append(
             Violation(
                 id="V001",
@@ -77,7 +82,7 @@ class TestModels:
                 resource_name="test",
                 severity=Severity.HIGH,
                 policy_ref="test",
-                description="test"
+                description="test",
             )
         )
         assert len(violations.violations) == 1
@@ -85,55 +90,54 @@ class TestModels:
 
 class TestProviders:
     """Test provider abstractions"""
-    
+
     def test_llm_factory_registration(self):
         """Test LLM factory registration"""
         from core.llm_provider import LLMFactory
         import core.bedrock_provider  # This registers the provider
-        
+
         providers = LLMFactory.list_providers()
         assert "bedrock" in providers
-    
+
     def test_database_factory_registration(self):
         """Test database factory registration"""
         from core.database_provider import DatabaseFactory
         import core.sqlite_provider  # This registers the provider
-        
+
         providers = DatabaseFactory.list_providers()
         assert "sqlite" in providers
-    
+
     def test_sqlite_provider_memory(self):
         """Test SQLite provider with in-memory database"""
         from core.sqlite_provider import SQLiteProvider
-        
+
         provider = SQLiteProvider(db_path=":memory:")
         assert provider.get_provider_name() == "sqlite"
-        
+
         checkpointer = provider.get_checkpointer()
         assert checkpointer is not None
 
 
 class TestIntakeAgent:
     """Test intake agent functionality"""
-    
-    def test_intake_with_mock_llm(self, mock_llm):
-        """Test intake agent with mocked LLM"""
+
+    def test_intake_deterministic_parser(self, mock_llm):
+        """Test intake agent uses deterministic parser (no LLM required)"""
         from agents.intake import intake_node
         from core.state import AgentState
 
-        mock_result = ResourceList(
-            resources=[
-                TerraformResource(
-                    resource_type="aws_db_instance",
-                    resource_name="main",
-                    attributes={"engine": "postgres"},
-                    line_number=1
-                )
-            ]
-        )
-
+        tf_code = """
+resource "aws_db_instance" "main" {
+  engine            = "postgres"
+  storage_encrypted = true
+  deletion_protection = true
+  backup_retention_period = 7
+  multi_az = true
+  publicly_accessible = false
+}
+"""
         state = {
-            "iac_code": 'resource "aws_db_instance" "main" {}',
+            "iac_code": tf_code,
             "file_path": "test.tf",
             "messages": [],
             "parsed_resources": [],
@@ -142,21 +146,27 @@ class TestIntakeAgent:
             "violations": [],
             "status": AuditStatus.PENDING,
             "current_node": "",
-            "error_message": ""
+            "error_message": "",
         }
 
-        with patch("agents.intake._invoke_structured", return_value=mock_result):
-            result = intake_node(state, mock_llm)
+        # LLM should NOT be called — parser is deterministic
+        result = intake_node(state, mock_llm)
+        mock_llm.invoke.assert_not_called()
 
         assert result["current_node"] == "intake"
         assert result["status"] == AuditStatus.IN_PROGRESS
         assert len(result["parsed_resources"]) == 1
-        assert result["parsed_resources"][0]["resource_type"] == "aws_db_instance"
+        r = result["parsed_resources"][0]
+        assert r["resource_type"] == "aws_db_instance"
+        assert r["resource_name"] == "main"
+        assert r["attributes"]["storage_encrypted"] is True
+        assert r["attributes"]["deletion_protection"] is True
+        assert r["attributes"]["backup_retention_period"] == 7
 
 
 class TestAuditorAgent:
     """Test auditor agent functionality"""
-    
+
     def test_auditor_with_violations(self, mock_llm):
         """Test auditor detects violations"""
         from agents.auditor import auditor_node
@@ -170,7 +180,7 @@ class TestAuditorAgent:
                     severity=Severity.HIGH,
                     policy_ref="delete_protection",
                     description="Missing deletion protection",
-                    remediation_hint="Add deletion_protection = true"
+                    remediation_hint="Add deletion_protection = true",
                 )
             ]
         )
@@ -184,7 +194,7 @@ class TestAuditorAgent:
                     resource_type="aws_db_instance",
                     resource_name="main",
                     attributes={"engine": "postgres"},
-                    line_number=1
+                    line_number=1,
                 )
             ],
             "retrieved_policies": [],
@@ -192,7 +202,7 @@ class TestAuditorAgent:
             "violations": [],
             "status": AuditStatus.IN_PROGRESS,
             "current_node": "intake",
-            "error_message": ""
+            "error_message": "",
         }
 
         with patch("agents.auditor._invoke_structured", return_value=mock_result):
@@ -202,7 +212,7 @@ class TestAuditorAgent:
         assert result["status"] == AuditStatus.FAILED
         assert len(result["violations"]) == 1
         assert result["violations"][0]["severity"] == Severity.HIGH
-    
+
     def test_auditor_no_violations(self, mock_llm):
         """Test auditor passes compliant resources"""
         from agents.auditor import auditor_node
@@ -218,7 +228,7 @@ class TestAuditorAgent:
                     resource_type="aws_db_instance",
                     resource_name="main",
                     attributes={"engine": "postgres", "deletion_protection": True},
-                    line_number=1
+                    line_number=1,
                 )
             ],
             "retrieved_policies": [],
@@ -226,7 +236,7 @@ class TestAuditorAgent:
             "violations": [],
             "status": AuditStatus.IN_PROGRESS,
             "current_node": "intake",
-            "error_message": ""
+            "error_message": "",
         }
 
         with patch("agents.auditor._invoke_structured", return_value=mock_result):
@@ -235,11 +245,11 @@ class TestAuditorAgent:
         assert result["current_node"] == "auditor"
         assert result["status"] == AuditStatus.PASSED
         assert len(result["violations"]) == 0
-    
+
     def test_auditor_no_resources(self, mock_llm):
         """Test auditor with no resources"""
         from agents.auditor import auditor_node
-        
+
         # Create state with no resources
         state = {
             "iac_code": "",
@@ -251,25 +261,28 @@ class TestAuditorAgent:
             "violations": [],
             "status": AuditStatus.IN_PROGRESS,
             "current_node": "intake",
-            "error_message": ""
+            "error_message": "",
         }
-        
+
         # Run auditor
         result = auditor_node(state, mock_llm)
-        
+
         assert result["status"] == AuditStatus.PASSED
         assert len(result["violations"]) == 0
 
 
 class TestFixtures:
     """Test that fixtures are valid"""
-    
+
     def test_bad_terraform_exists(self, bad_terraform_code):
         """Test bad terraform fixture exists and has content"""
         assert bad_terraform_code
         assert "aws_db_instance" in bad_terraform_code
-        assert "deletion_protection" not in bad_terraform_code or "deletion_protection = false" in bad_terraform_code
-    
+        assert (
+            "deletion_protection" not in bad_terraform_code
+            or "deletion_protection = false" in bad_terraform_code
+        )
+
     def test_good_terraform_exists(self, good_terraform_code):
         """Test good terraform fixture exists and has content"""
         assert good_terraform_code
