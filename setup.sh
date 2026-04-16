@@ -9,6 +9,10 @@ echo "  Phase 1: Deletion Protection Checker"
 echo "========================================================================"
 echo ""
 
+# Pull latest changes
+echo "Pulling latest changes from GitHub..."
+git pull || { echo "Warning: git pull failed, continuing with existing code"; }
+
 # Check Python version
 echo "Checking Python version..."
 python3 --version || { echo "Error: Python 3 is required"; exit 1; }
@@ -52,7 +56,10 @@ echo "========================================================================"
 echo ""
 echo "Next steps:"
 echo "1. Activate the virtual environment: source .venv/bin/activate"
-echo "2. Configure AWS credentials in .env file"
+echo "2. Configure your provider in .env:"
+echo "   - GitHub Copilot: set LLM_PROVIDER=github-copilot and GITHUB_COPILOT_TOKEN"
+echo "   - AWS Bedrock:    set LLM_PROVIDER=bedrock and AWS credentials"
+echo "   - HuggingFace:   set LLM_PROVIDER=huggingface and HF_TOKEN"
 echo "3. Run tests: pytest tests/ -v"
 echo "4. Run the application: python main.py tests/fixtures/bad_terraform.tf"
 echo ""
