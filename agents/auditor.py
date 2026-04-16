@@ -1,6 +1,7 @@
 """
 Auditor agent - Checks resources against retrieved policies (Phase 2: RAG-enabled).
 """
+
 import json
 import re
 import time
@@ -11,7 +12,13 @@ from langchain_core.language_models import BaseChatModel
 from pydantic import BaseModel
 
 from core.state import AgentState
-from models.violations import Violation, ViolationList, Severity, AuditStatus, TerraformResource
+from models.violations import (
+    Violation,
+    ViolationList,
+    Severity,
+    AuditStatus,
+    TerraformResource,
+)
 from models.policy import Policy
 
 T = TypeVar("T", bound=BaseModel)
@@ -24,7 +31,9 @@ def _is_rate_limit(exc: Exception) -> bool:
     return any(s in msg for s in _RATE_LIMIT_SIGNALS)
 
 
-def _invoke_structured(llm: BaseChatModel, prompt: ChatPromptTemplate, inputs: dict, schema: Type[T]) -> T:
+def _invoke_structured(
+    llm: BaseChatModel, prompt: ChatPromptTemplate, inputs: dict, schema: Type[T]
+) -> T:
     """
     Invoke the LLM and parse the result into a Pydantic model.
 
@@ -32,6 +41,7 @@ def _invoke_structured(llm: BaseChatModel, prompt: ChatPromptTemplate, inputs: d
     (e.g. Ollama, or HF router models), falls back to plain invoke + JSON extraction.
     Retries up to 3 times with exponential backoff on rate-limit (429) errors.
     """
+
     def _plain_invoke():
         chain = prompt | llm
         response = chain.invoke(inputs)
@@ -46,12 +56,22 @@ def _invoke_structured(llm: BaseChatModel, prompt: ChatPromptTemplate, inputs: d
     last_exc: Exception = RuntimeError("No attempts made")
     for attempt in range(3):
         try:
-            chain = prompt | llm.with_structured_output(schema)
+            # OpenAI-compatible providers (including GitHub Copilot) require
+            # method="function_calling" — schemas don't pass the strict
+            # structured-output validator in langchain-openai>=0.3.
+            from langchain_openai import ChatOpenAI
+
+            structured_kwargs = (
+                {"method": "function_calling"} if isinstance(llm, ChatOpenAI) else {}
+            )
+            chain = prompt | llm.with_structured_output(schema, **structured_kwargs)
             return chain.invoke(inputs)
         except Exception as exc:
             if _is_rate_limit(exc):
-                wait = 15 * (2 ** attempt)  # 15s, 30s, 60s
-                print(f"[AUDITOR] Rate limited — retrying in {wait}s (attempt {attempt + 1}/3)")
+                wait = 15 * (2**attempt)  # 15s, 30s, 60s
+                print(
+                    f"[AUDITOR] Rate limited — retrying in {wait}s (attempt {attempt + 1}/3)"
+                )
                 time.sleep(wait)
                 last_exc = exc
                 continue
@@ -60,7 +80,7 @@ def _invoke_structured(llm: BaseChatModel, prompt: ChatPromptTemplate, inputs: d
                 return _plain_invoke()
             except Exception as plain_exc:
                 if _is_rate_limit(plain_exc):
-                    wait = 15 * (2 ** attempt)
+                    wait = 15 * (2**attempt)
                     print(f"[AUDITOR] Rate limited (plain) — retrying in {wait}s")
                     time.sleep(wait)
                     last_exc = plain_exc
@@ -109,33 +129,33 @@ Be strict: if deletion_protection is missing or set to false, it's a HIGH severi
 def auditor_node(state: AgentState, llm: BaseChatModel) -> Dict[str, Any]:
     """
     Audit parsed resources against retrieved policies (Phase 2: RAG-enabled).
-    
+
     This agent now uses policies retrieved by the policy_analyst node to
     perform dynamic, multi-policy auditing instead of hardcoded rules.
-    
+
     Args:
         state: Current agent state
         llm: Language model instance
-        
+
     Returns:
         Dict with updated state fields
     """
     try:
         parsed_resources = state.get("parsed_resources", [])
         retrieved_policies = state.get("retrieved_policies", [])
-        
+
         # If no resources to audit, pass the audit
         if not parsed_resources:
             return {
                 "violations": [],
                 "current_node": "auditor",
                 "status": AuditStatus.PASSED,
-                "messages": ["[AUDITOR] No database resources found - audit passed"]
+                "messages": ["[AUDITOR] No database resources found - audit passed"],
             }
-        
+
         # Convert resources to JSON for the prompt
         resources_json = _format_resources_for_prompt(parsed_resources)
-        
+
         # Build prompt based on whether we have retrieved policies
         if retrieved_policies:
             # Phase 2: Dynamic prompt from retrieved policies
@@ -145,22 +165,26 @@ def auditor_node(state: AgentState, llm: BaseChatModel) -> Dict[str, Any]:
             # Fallback: Use hardcoded prompt — pass raw template (with {{ }} escapes)
             # directly to ChatPromptTemplate; don't pre-render via .format()
             prompt_text = FALLBACK_AUDITOR_PROMPT
-            message_prefix = "[AUDITOR] Using fallback policy (RAG disabled or no policies found)"
-        
+            message_prefix = (
+                "[AUDITOR] Using fallback policy (RAG disabled or no policies found)"
+            )
+
         # Create prompt
         prompt = ChatPromptTemplate.from_template(prompt_text)
 
         # Invoke with provider-aware structured output
-        result = _invoke_structured(llm, prompt, {"resources_json": resources_json}, ViolationList)
-        
+        result = _invoke_structured(
+            llm, prompt, {"resources_json": resources_json}, ViolationList
+        )
+
         # Extract violations
         violations = result.violations if result else []
-        
+
         # Ensure each violation has a unique ID
         for i, violation in enumerate(violations):
             if not violation.id or violation.id == "unique-id":
                 violation.id = f"V{str(uuid.uuid4())[:8]}"
-        
+
         # Determine status
         if violations:
             status = AuditStatus.FAILED
@@ -168,32 +192,36 @@ def auditor_node(state: AgentState, llm: BaseChatModel) -> Dict[str, Any]:
         else:
             status = AuditStatus.PASSED
             message = "[AUDITOR] All resources are compliant"
-        
+
         return {
-            "violations": [v.model_dump() if hasattr(v, "model_dump") else v for v in violations],
+            "violations": [
+                v.model_dump() if hasattr(v, "model_dump") else v for v in violations
+            ],
             "current_node": "auditor",
             "status": status,
-            "messages": [message_prefix, message]
+            "messages": [message_prefix, message],
         }
-        
+
     except Exception as e:
         return {
             "violations": [],
             "current_node": "auditor",
             "status": AuditStatus.ERROR,
             "error_message": f"Auditor failed: {str(e)}",
-            "messages": [f"[AUDITOR] ERROR: {str(e)}"]
+            "messages": [f"[AUDITOR] ERROR: {str(e)}"],
         }
 
 
-def _build_dynamic_prompt(resources: List[TerraformResource], policies: List[Policy]) -> str:
+def _build_dynamic_prompt(
+    resources: List[TerraformResource], policies: List[Policy]
+) -> str:
     """
     Build a dynamic audit prompt from retrieved policies.
-    
+
     Args:
         resources: List of parsed Terraform resources
         policies: List of retrieved Policy objects
-        
+
     Returns:
         Formatted prompt string with policies and resources
     """
@@ -202,12 +230,12 @@ def _build_dynamic_prompt(resources: List[TerraformResource], policies: List[Pol
 Your task is to audit the provided Terraform resources against the following policies.
 
 """
-    
+
     # Add each policy to the prompt
     prompt += "=" * 80 + "\n"
     prompt += "POLICIES TO ENFORCE:\n"
     prompt += "=" * 80 + "\n\n"
-    
+
     for i, policy in enumerate(policies, 1):
         # Policy may be a dict (serialized for checkpoint) or a Pydantic object
         if isinstance(policy, dict):
@@ -245,13 +273,13 @@ Your task is to audit the provided Terraform resources against the following pol
             prompt += f"**Remediation:** {remediation}\n\n"
 
         prompt += "-" * 80 + "\n\n"
-    
+
     # Add resources section
     prompt += "=" * 80 + "\n"
     prompt += "RESOURCES TO AUDIT:\n"
     prompt += "=" * 80 + "\n\n"
     prompt += "{resources_json}\n\n"
-    
+
     # Add instructions
     prompt += """
 INSTRUCTIONS:
@@ -283,7 +311,7 @@ If all resources are compliant with all policies, return: {{"violations": []}}
 
 Be thorough: check each resource against each applicable policy.
 """
-    
+
     return prompt
 
 
@@ -297,12 +325,15 @@ def _format_resources_for_prompt(resources: List[TerraformResource]) -> str:
         if isinstance(resource, dict):
             resources_data.append(resource)
         else:
-            resources_data.append({
-                "resource_type": resource.resource_type,
-                "resource_name": resource.resource_name,
-                "attributes": resource.attributes,
-                "line_number": resource.line_number
-            })
+            resources_data.append(
+                {
+                    "resource_type": resource.resource_type,
+                    "resource_name": resource.resource_name,
+                    "attributes": resource.attributes,
+                    "line_number": resource.line_number,
+                }
+            )
 
     import json
+
     return json.dumps(resources_data, indent=2)
