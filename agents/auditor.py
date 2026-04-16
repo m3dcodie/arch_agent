@@ -99,6 +99,12 @@ POLICY: All production database instances MUST have deletion_protection = true
 Resources to audit:
 {resources_json}
 
+CRITICAL RULES — READ BEFORE AUDITING:
+1. The resource JSON above is the GROUND TRUTH. Trust it completely.
+2. If deletion_protection is present and set to `true`, the resource IS compliant — do NOT flag it.
+3. ONLY flag a resource if deletion_protection is explicitly `false` or completely absent.
+4. Do NOT infer anything from resource names, descriptions, or any other source.
+
 IMPORTANT S3 RULES:
 - S3 encryption is configured via a SEPARATE "aws_s3_bucket_server_side_encryption_configuration" resource.
   If such a resource exists referencing the bucket, the bucket IS encrypted — do NOT flag it.
@@ -289,6 +295,13 @@ Your task is to audit the provided Terraform resources against the following pol
 
     # Add instructions
     prompt += """
+CRITICAL RULES — READ BEFORE AUDITING:
+1. The resource JSON above is the GROUND TRUTH. Trust it completely.
+2. If an attribute is present and set to `true`, the resource IS compliant for that check — do NOT flag it.
+3. If an attribute is present and set to a number >= threshold, the resource IS compliant — do NOT flag it.
+4. ONLY flag a resource if the attribute is EXPLICITLY set to a non-compliant value, OR is completely absent.
+5. Do NOT infer or assume missing attributes from resource names, descriptions, or any other source.
+
 IMPORTANT S3 RULES:
 - S3 encryption is configured via a SEPARATE "aws_s3_bucket_server_side_encryption_configuration" resource.
   If such a resource exists referencing the bucket, the bucket IS encrypted — do NOT flag it for missing encryption.
