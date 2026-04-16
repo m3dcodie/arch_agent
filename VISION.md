@@ -177,10 +177,119 @@ pyproject.toml                ← ❌ missing
 
 ## Priority Order
 
-The engine (LangGraph, agents, models, RAG microservices) is done — the hard part is built. What remains is surface-area work.
+The engine (LangGraph, agents, models, RAG microservices) is done — the hard part is built. What remains is surface-area work and enterprise-readiness.
 
-1. **`pyproject.toml` + `ADAGRunner`** — makes it a real installable package; unlocks Modes 1 and 2
+1. **`pyproject.toml` + `ADAGRunner`** — ✅ Done; installable package with CLI entry point, unlocks Modes 1 and 2
 2. **Direct policy loader** — replace the `USE_RAG=false` empty fallback with a disk-based policy loader so Mode 1 works fully offline
 3. **`mcp_server.py`** — ~100 lines; massive UX gain for AI agent workflows
 4. **`cli.py`** (`adag scan`, `adag ingest`) — developer experience polish and CI integration
 5. **Fill `core/rag_provider.py`** — formalises the raw `requests` calls in `policy_analyst.py`; enables clean `ingest` command for Mode 3
+6. **SARIF output** — required for GitHub Advanced Security and Azure DevOps native integration; turns scan results into PR annotations without custom tooling
+7. **Audit trail and structured logging** — every scan must be recorded with timestamp, file hash, policy version, and result; required for compliance and operational visibility
+
+---
+
+## Roadmap: Enterprise-Readiness Items
+
+These items are not yet in the build plan but are required before ADAG can be positioned in an enterprise procurement conversation alongside tools like Snyk or Checkov.
+
+### SARIF Output (High Priority)
+
+**Why:** SARIF (Static Analysis Results Interchange Format) is the industry standard consumed by GitHub Advanced Security, Azure DevOps, and most enterprise security dashboards. Without it, ADAG results cannot be surfaced as native PR annotations or fed into a SIEM.
+
+**What to build:**
+
+```python
+# Target usage
+result = runner.scan()
+result.to_sarif("adag-results.sarif")   # GitHub Code Scanning compatible
+result.to_json("adag-results.json")     # Machine-readable
+result.to_text()                        # Human-readable (existing)
+```
+
+**SARIF structure required:**
+
+```json
+{
+  "version": "2.1.0",
+  "runs": [{
+    "tool": { "driver": { "name": "adag", "version": "0.1.0", "rules": [] } },
+    "results": [{
+      "ruleId": "delete_protection",
+      "level": "error",
+      "message": { "text": "Database instance does not have deletion protection enabled" },
+      "locations": [{ "physicalLocation": { "artifactLocation": { "uri": "infra/main.tf" }, "region": { "startLine": 3 } } }]
+    }]
+  }]
+}
+```
+
+**GitHub Actions integration (example):**
+
+```yaml
+- name: Run ADAG scan
+  run: adag scan ./infra/ --format sarif --output adag.sarif
+
+- name: Upload SARIF
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: adag.sarif
+```
+
+**Gap to close:** Add `SARIFSerializer` class in `models/serializers.py`; wire into `ADAGRunner.scan()` and CLI `--format` flag.
+
+---
+
+### Audit Trail and Structured Logging (High Priority)
+
+**Why:** Enterprise compliance teams (SOC 2, ISO 27001, internal audit) require evidence that governance controls ran. "The tool checked it" is not evidence — a timestamped, immutable record of what was checked, against which policy version, and what the result was, is evidence.
+
+**What to build:**
+
+Every scan should produce a structured audit record, persisted to the existing SQLite database (or swappable backend via the existing `DatabaseProvider` abstraction):
+
+```python
+@dataclass
+class AuditRecord:
+    scan_id: str              # UUID
+    timestamp: str            # ISO 8601
+    file_path: str            # Scanned file
+    file_hash: str            # SHA-256 of the scanned content
+    policy_version: str       # Git commit or semver of policies dir
+    policies_applied: list    # List of policy IDs retrieved and applied
+    violations: list          # Typed violation objects
+    status: str               # PASSED | FAILED | ERROR
+    llm_provider: str         # bedrock / openai / ollama
+    llm_model: str            # model ID used
+    duration_ms: int          # Wall-clock time for the scan
+    token_cost_estimate: float # Approximate LLM token cost in USD
+```
+
+**Structured log output (JSON lines, consumable by Datadog / CloudWatch / ELK):**
+
+```json
+{"event": "scan_complete", "scan_id": "abc-123", "file": "infra/main.tf", "status": "FAILED", "violations": 2, "policies_applied": ["delete_protection", "encryption_at_rest"], "duration_ms": 3240, "token_cost_usd": 0.0031, "timestamp": "2026-04-16T10:00:00Z"}
+```
+
+**Gap to close:**
+- Add `AuditRecord` model to `models/`
+- Add `AuditLogger` class to `core/` that writes to the existing `DatabaseProvider`
+- Wire into `ADAGRunner.scan()` as a post-scan hook
+- Add `adag history` CLI command to query past scan records
+- Add `LOG_FORMAT=json` env var to switch between human and structured output
+
+---
+
+## Additional Strategic Use Cases
+
+Beyond the three delivery modes, the following high-value applications are viable without significant re-architecture:
+
+| Use Case | Description | Effort |
+|---|---|---|
+| **PR Review Bot** | GitHub App that triggers on PR open and posts SARIF violations as inline review comments | Medium — requires SARIF output (above) + GitHub App wrapper |
+| **Live Drift Detection** | Scan live AWS resources via Boto3 and compare against the same policy engine | Medium — Boto3 integration; new intake agent variant |
+| **Cost Governance Policies** | Policies like "all EC2 must use Graviton" open the FinOps buyer persona | Low — purely policy authoring, engine unchanged |
+| **Diagram Auditing** | Ingest Mermaid / draw.io and audit architectural patterns (e.g. "WAF must front all public services") | High — new intake agent variant |
+| **ADR Auto-Generation** | After a passing scan, emit a draft Architecture Decision Record: "RDS encryption confirmed compliant as of 2026-04-16" | Low — post-scan LLM call |
+| **Remediation Agent** | Phase 3: generate a git patch / Terraform snippet to fix each violation automatically | High — new LangGraph node; highest developer adoption driver |
+| **Waiver / Approval Workflow** | Human-in-the-loop node: pause on HIGH violations and require architect sign-off via CLI or Slack | Medium — LangGraph interrupt node; critical for preventing tool bypass |

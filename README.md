@@ -51,35 +51,92 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edit `.env` and configure your settings:
+Edit `.env` for your chosen provider. Three options are supported:
+
+---
+
+#### Option A — GitHub Copilot (recommended, no AWS needed)
+
+Requires an active [GitHub Copilot subscription](https://github.com/features/copilot/plans).
+
+**Step 1:** Install the GitHub CLI and authenticate:
 
 ```bash
-# AWS Configuration
-AWS_PROFILE=default
-AWS_REGION=us-east-1
+# Ubuntu/Debian
+sudo apt install gh
 
-# LLM Configuration
-LLM_PROVIDER=bedrock
-LLM_MODEL_ID=anthropic.claude-sonnet-4-5-20250929-v1:0
-
-# Database Configuration
-DB_PROVIDER=sqlite
-DB_PATH=./data/adag.db
-
-# Application Settings
-LOG_LEVEL=INFO
+# macOS
+brew install gh
 ```
 
-### 5. Verify AWS Configuration
+```bash
+gh auth login --scopes 'copilot'
+```
+
+**Step 2:** Get your token:
+
+```bash
+gh auth status --show-token
+# copy the ghu_... value
+```
+
+**Step 3:** Set in `.env`:
+
+```ini
+LLM_PROVIDER=github-copilot
+GITHUB_COPILOT_TOKEN=ghu_your_token_here
+
+# Default model (available on all Copilot plans)
+GITHUB_COPILOT_MODEL=gpt-4o
+
+# Optional: use different models per agent role
+# INTAKE_MODEL=gpt-4.1-mini      # fast parser (all plans)
+# AUDITOR_MODEL=claude-sonnet-4-5 # powerful auditor (Pro+ / Enterprise only)
+
+DB_PROVIDER=sqlite
+DB_PATH=./data/adag.db
+```
+
+---
+
+#### Option B — AWS Bedrock
+
+Requires an AWS account with Bedrock access to Claude Sonnet 4.5.
+
+```ini
+LLM_PROVIDER=bedrock
+AWS_PROFILE=default
+AWS_REGION=us-east-1
+ANTHROPIC_MODEL=au.anthropic.claude-sonnet-4-5-20250929-v1:0
+
+DB_PROVIDER=sqlite
+DB_PATH=./data/adag.db
+```
+
+Verify your AWS setup:
 
 ```bash
 aws sts get-caller-identity --profile default
+aws bedrock list-foundation-models --region us-east-1 --profile default
 ```
 
-Ensure you have access to Bedrock:
+---
 
-```bash
-aws bedrock list-foundation-models --region us-east-1 --profile default
+#### Option C — HuggingFace (free tier)
+
+Get a free token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens).
+
+```ini
+LLM_PROVIDER=huggingface
+HF_TOKEN=hf_your_token_here
+HF_MODEL=Qwen/Qwen2.5-72B-Instruct
+
+# Optional per-agent overrides
+# INTAKE_MODEL=Qwen/Qwen2.5-7B-Instruct
+# AUDITOR_MODEL=Qwen/Qwen2.5-72B-Instruct
+
+DB_PROVIDER=sqlite
+DB_PATH=./data/adag.db
 ```
 
 ## 📖 Usage

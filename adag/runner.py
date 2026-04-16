@@ -17,6 +17,7 @@ Examples:
     results = runner.scan()
     print(results[0].to_json())
 """
+
 import os
 import logging
 from pathlib import Path
@@ -57,6 +58,7 @@ class ADAGRunner:
             load_dotenv(env_file)
         else:
             from dotenv import find_dotenv
+
             load_dotenv(find_dotenv(usecwd=True))
 
         if not terraform_dir and not terraform_file:
@@ -86,9 +88,15 @@ class ADAGRunner:
         _llm = (llm_provider or os.getenv("LLM_PROVIDER", "bedrock")).lower()
         if _llm == "bedrock":
             import core.bedrock_provider  # noqa: F401
-        import core.ollama_provider       # noqa: F401
-        import core.huggingface_provider  # noqa: F401
-        import core.sqlite_provider       # noqa: F401
+        try:
+            import core.ollama_provider  # noqa: F401
+        except ImportError:
+            pass
+        try:
+            import core.huggingface_provider  # noqa: F401
+        except ImportError:
+            pass
+        import core.sqlite_provider  # noqa: F401
 
         # Lazy-initialise the graph on first scan()
         self._graph = None
@@ -142,6 +150,7 @@ class ADAGRunner:
     def _get_graph(self):
         if self._graph is None:
             from core.graph import create_graph
+
             self._graph = create_graph(llm_provider=self.llm_provider)
         return self._graph
 

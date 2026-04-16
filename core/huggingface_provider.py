@@ -2,6 +2,7 @@
 Hugging Face LLM provider via the HF router (OpenAI-compatible endpoint).
 Uses https://router.huggingface.co/v1 — no AWS credentials required.
 """
+
 import os
 from typing import Optional
 from langchain_openai import ChatOpenAI
@@ -10,11 +11,12 @@ from langchain_core.language_models import BaseChatModel
 from core.llm_provider import LLMProvider, LLMFactory
 
 HF_ROUTER_BASE_URL = "https://router.huggingface.co/v1"
-HF_DEFAULT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 
 
 class HuggingFaceProvider(LLMProvider):
     """Hugging Face serverless inference provider via the HF router."""
+
+    DEFAULT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 
     def __init__(
         self,
@@ -22,7 +24,7 @@ class HuggingFaceProvider(LLMProvider):
         api_key: Optional[str] = None,
         **kwargs,
     ):
-        self.model = model or os.getenv("HF_MODEL", HF_DEFAULT_MODEL)
+        self.model = model or os.getenv("HF_MODEL", self.DEFAULT_MODEL)
         self.api_key = api_key or os.getenv("HF_TOKEN", "")
         self.temperature = float(os.getenv("HF_TEMPERATURE", "0.1"))
         self.max_tokens = int(os.getenv("HF_MAX_TOKENS", "2048"))
