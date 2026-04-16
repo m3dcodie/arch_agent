@@ -91,12 +91,17 @@ Focus on these resource types:
 - aws_kms_key
 - aws_s3_bucket
 - aws_s3_bucket_public_access_block
+- aws_s3_bucket_server_side_encryption_configuration
 
 For each resource, extract:
 1. resource_type: The Terraform resource type
 2. resource_name: The resource identifier/name
 3. attributes: All configuration attributes as a dictionary
 4. line_number: Approximate line number (if determinable)
+
+IMPORTANT for S3 resources:
+- Extract aws_s3_bucket, aws_s3_bucket_public_access_block, AND aws_s3_bucket_server_side_encryption_configuration as separate resources.
+- The auditor will correlate them by matching resource names (bucket references).
 
 Terraform Code:
 ```
@@ -115,7 +120,7 @@ Return ONLY a valid JSON object with this structure:
   ]
 }}
 
-If no database resources are found, return: {{"resources": []}}
+If no auditable resources are found, return: {{"resources": []}}
 """
 
 

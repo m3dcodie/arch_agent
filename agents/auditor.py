@@ -99,6 +99,13 @@ POLICY: All production database instances MUST have deletion_protection = true
 Resources to audit:
 {resources_json}
 
+IMPORTANT S3 RULES:
+- S3 encryption is configured via a SEPARATE "aws_s3_bucket_server_side_encryption_configuration" resource.
+  If such a resource exists referencing the bucket, the bucket IS encrypted — do NOT flag it.
+- S3 public access is configured via a SEPARATE "aws_s3_bucket_public_access_block" resource.
+  If such a resource exists with block_public_acls=true, the bucket IS compliant — do NOT flag it.
+- Only flag an aws_s3_bucket if no companion encryption/public-access-block resource exists in the list above.
+
 For each resource, check if:
 1. The resource is a database (aws_db_instance, aws_rds_cluster, etc.)
 2. The "deletion_protection" attribute exists
@@ -282,6 +289,13 @@ Your task is to audit the provided Terraform resources against the following pol
 
     # Add instructions
     prompt += """
+IMPORTANT S3 RULES:
+- S3 encryption is configured via a SEPARATE "aws_s3_bucket_server_side_encryption_configuration" resource.
+  If such a resource exists referencing the bucket, the bucket IS encrypted — do NOT flag it for missing encryption.
+- S3 public access is configured via a SEPARATE "aws_s3_bucket_public_access_block" resource.
+  If such a resource exists with block_public_acls=true, the bucket IS compliant — do NOT flag it for public access.
+- Only flag an aws_s3_bucket if no companion encryption/public-access-block resource exists in the resource list above.
+
 INSTRUCTIONS:
 1. Check each resource against ALL applicable policies above
 2. For each violation found, identify:
