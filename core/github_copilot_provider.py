@@ -206,6 +206,7 @@ class GitHubCopilotProvider(LLMProvider):
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             "default_headers": merged_headers,
+            "request_timeout": int(os.getenv("GITHUB_COPILOT_TIMEOUT", "120")),
             **self.extra_kwargs,
             **kwargs,  # model=INTAKE_MODEL / AUDITOR_MODEL lands here
         }
