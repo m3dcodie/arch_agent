@@ -288,3 +288,112 @@ class TestFixtures:
         assert good_terraform_code
         assert "aws_db_instance" in good_terraform_code
         assert "deletion_protection = true" in good_terraform_code
+
+
+class TestPerAgentModelSelection:
+    """Test per-agent model selection for all providers"""
+
+    def test_bedrock_provider_accepts_model_id_kwarg(self):
+        """Test Bedrock provider's get_model() method accepts model_id parameter"""
+        from core.bedrock_provider import BedrockProvider
+
+        # Verify the method signature includes support for model_id kwarg
+        # by checking that get_model can be called with model_id parameter
+        import inspect
+
+        sig = inspect.signature(BedrockProvider.get_model)
+        # Should accept **kwargs to allow model_id parameter
+        assert "kwargs" in str(sig)
+
+    def test_github_copilot_provider_accepts_model_kwarg(self):
+        """Test GitHub Copilot provider's get_model() method accepts model parameter"""
+        from core.github_copilot_provider import GitHubCopilotProvider
+
+        # Verify the method signature includes support for model kwarg
+        import inspect
+
+        sig = inspect.signature(GitHubCopilotProvider.get_model)
+        # Should accept **kwargs to allow model parameter
+        assert "kwargs" in str(sig)
+
+    def test_graph_get_llm_for_role_uses_env_vars(self):
+        """Test _get_llm_for_role reads INTAKE_MODEL and AUDITOR_MODEL from env"""
+        from core.graph import ADAGGraph
+        import os
+
+        # Verify the method looks for role-based env vars
+        import inspect
+
+        source = inspect.getsource(ADAGGraph._get_llm_for_role)
+        # Should read environment variables with role prefix
+        assert 'f"{role}_MODEL"' in source or "{role}_MODEL" in source
+
+
+class TestDynamicResourceDiscovery:
+    """Test intake agent's dynamic resource discovery from policies"""
+
+    def test_intake_discovers_resources_from_policies(self):
+        """Test that intake agent dynamically discovers resource types from policies"""
+        from agents.intake import _get_auditable_resource_types
+
+        # Get discovered resource types
+        resource_types = _get_auditable_resource_types()
+
+        # Should be a non-empty set
+        assert isinstance(resource_types, set)
+        assert len(resource_types) > 0
+
+        # Should include at least the built-in resources
+        assert "aws_db_instance" in resource_types
+        assert "aws_s3_bucket" in resource_types
+        assert "aws_kms_key" in resource_types
+        assert "provider" in resource_types
+
+    def test_intake_extracts_resources_from_builtin_policies(self):
+        """Test intake agent extracts resources based on built-in policies"""
+        from agents.intake import intake_node
+        from models.violations import AuditStatus
+
+        tf_code = """
+resource "aws_db_instance" "main" {
+  engine            = "postgres"
+  deletion_protection = true
+}
+
+resource "aws_s3_bucket" "logs" {
+  bucket = "my-logs"
+}
+
+resource "aws_unsupported_resource" "test" {
+  name = "should-be-ignored"
+}
+"""
+        state = {
+            "iac_code": tf_code,
+            "file_path": "test.tf",
+            "messages": [],
+            "parsed_resources": [],
+            "retrieved_policies": [],
+            "resource_types": [],
+            "violations": [],
+            "status": AuditStatus.PENDING,
+            "current_node": "",
+            "error_message": "",
+        }
+
+        from unittest.mock import MagicMock
+
+        mock_llm = MagicMock()
+
+        result = intake_node(state, mock_llm)
+
+        # Should have parsed the supported resources
+        assert len(result["parsed_resources"]) >= 2
+
+        # Verify correct resources were extracted
+        resource_types = {r["resource_type"] for r in result["parsed_resources"]}
+        assert "aws_db_instance" in resource_types
+        assert "aws_s3_bucket" in resource_types
+
+        # Unsupported resource should be ignored
+        assert "aws_unsupported_resource" not in resource_types

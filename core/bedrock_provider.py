@@ -1,6 +1,7 @@
 """
 AWS Bedrock LLM provider implementation.
 """
+
 import os
 from typing import Optional
 import boto3
@@ -12,107 +13,109 @@ from core.llm_provider import LLMProvider, LLMFactory
 
 class BedrockProvider(LLMProvider):
     """AWS Bedrock LLM provider"""
-    
+
     def __init__(
         self,
         model_id: Optional[str] = None,
         region: Optional[str] = None,
         profile_name: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ):
         """
         Initialize Bedrock provider.
-        
+
         Args:
             model_id: Bedrock model ID (e.g., 'anthropic.claude-sonnet-4-5-20250929-v1:0')
             region: AWS region
             profile_name: AWS profile name
             **kwargs: Additional configuration for ChatBedrock
         """
+        # Use standardized BEDROCK_MODEL env var (consistent with HF_MODEL, OLLAMA_MODEL, etc.)
         self.model_id = model_id or os.getenv(
-            "ANTHROPIC_MODEL",
-            os.getenv("LLM_MODEL_ID", "au.anthropic.claude-sonnet-4-5-20250929-v1:0")
+            "BEDROCK_MODEL",
+            "anthropic.claude-sonnet-4-5-20250929-v1:0",
         )
         self.region = region or os.getenv("AWS_REGION", "us-east-1")
         self.profile_name = profile_name or os.getenv("AWS_PROFILE", "default")
         self.extra_config = kwargs
-        
+
         # Validate configuration on initialization
         self.validate_config()
-    
+
     def get_model(self, **kwargs) -> BaseChatModel:
         """
         Get ChatBedrock model instance.
-        
+
         Args:
+            model_id: Override the default model ID for per-agent model selection
             **kwargs: Override configuration for this specific model instance
-            
+
         Returns:
             ChatBedrock: Configured Bedrock chat model
         """
+        # Extract model_id override if provided (for per-agent selection)
+        model_id = kwargs.pop("model_id", None) or self.model_id
+
         # Create boto3 session with profile
-        session = boto3.Session(
-            profile_name=self.profile_name,
-            region_name=self.region
-        )
-        
+        session = boto3.Session(profile_name=self.profile_name, region_name=self.region)
+
         # Create bedrock client
         client = session.client("bedrock-runtime")
-        
+
         # Merge instance config with call-time overrides
         config = {
-            "model_id": self.model_id,
+            "model_id": model_id,
             "region_name": self.region,
             "client": client,
             **self.extra_config,
-            **kwargs
+            **kwargs,
         }
-        
+
         # Check if model uses inference profile (starts with region prefix like 'au.', 'us.', 'eu.')
-        model_id_parts = self.model_id.split(".")
+        model_id_parts = model_id.split(".")
         is_inference_profile = len(model_id_parts) > 1 and len(model_id_parts[0]) == 2
-        
+
         # Determine provider based on model ID
-        if "amazon" in self.model_id or "nova" in self.model_id:
+        if "amazon" in model_id or "nova" in model_id:
             # Amazon Nova models require the Converse API
             config["beta_use_converse_api"] = True
-            print(f"[DEBUG] Using model: {self.model_id} with Converse API")
+            print(f"[DEBUG] Using model: {model_id} with Converse API")
         elif is_inference_profile:
             # Inference profiles require Converse API
             config["beta_use_converse_api"] = True
-            print(f"[DEBUG] Using inference profile: {self.model_id} with Converse API")
-        elif "anthropic" in self.model_id or "claude" in self.model_id:
+            print(f"[DEBUG] Using inference profile: {model_id} with Converse API")
+        elif "anthropic" in model_id or "claude" in model_id:
             # Base model IDs need provider specified
             config["provider"] = "anthropic"
-            print(f"[DEBUG] Using model: {self.model_id} with provider=anthropic")
+            print(f"[DEBUG] Using model: {model_id} with provider=anthropic")
         else:
             # For other models, let LangChain auto-detect
-            print(f"[DEBUG] Using model: {self.model_id} (provider auto-detected)")
-        
+            print(f"[DEBUG] Using model: {model_id} (provider auto-detected)")
+
         llm = ChatBedrock(**config)
-        
+
         return llm
-    
+
     def get_provider_name(self) -> str:
         """Get the provider name"""
         return "bedrock"
-    
+
     def validate_config(self) -> bool:
         """
         Validate AWS Bedrock configuration.
-        
+
         Returns:
             bool: True if valid
-            
+
         Raises:
             ValueError: If configuration is invalid
         """
         if not self.model_id:
             raise ValueError("model_id is required for Bedrock provider")
-        
+
         if not self.region:
             raise ValueError("AWS region is required for Bedrock provider")
-        
+
         # Validate AWS credentials are available
         try:
             session = boto3.Session(profile_name=self.profile_name)
@@ -124,7 +127,7 @@ class BedrockProvider(LLMProvider):
                 )
         except Exception as e:
             raise ValueError(f"AWS configuration error: {str(e)}")
-        
+
         return True
 
 
