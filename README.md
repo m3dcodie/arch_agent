@@ -1,10 +1,24 @@
 # ADAG — AI-Driven Architecture Guardrail
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 A multi-agent AI system that acts as a **virtual principal engineer** — scanning Terraform infrastructure-as-code against your organisation's policy standards and returning intelligent, actionable audit results.
 
 Built to explore and demonstrate: **LangGraph** · **Multi-Agent Systems** · **RAG** · **MCP** · **LLM Provider Abstraction**
 
 ---
+
+## Table of Contents
+
+- What it does
+- Key Features
+- Quick Start
+- RAG Mode
+- MCP Server
+- Running Tests
+- Documentation
+- License
+
 
 ## What it does
 
@@ -33,7 +47,9 @@ Status: FAILED  (exit code 1)
 - **Three output formats** — human-readable text, JSON, SARIF 2.1.0 (GitHub Advanced Security)
 - **MCP server** — any MCP-compatible AI assistant (Claude Desktop, VS Code Copilot) can call ADAG as a tool
 - **RAG mode** — index your internal architecture docs and query them semantically at scan time
-- **CI/CD ready** — exit codes 0/1/2, SARIF upload, GitHub Actions example included
+- **CI/CD ready** — exit codes 0/1/2 and SARIF upload supported. Add a GitHub Actions workflow under `.github/workflows/` to enable CI (I can add a minimal workflow if you want).
+
+Model mapping and recommended model choices are documented in `llms.txt` at the repository root. Update that file when you change models.
 
 ## Quick Start
 
