@@ -1,447 +1,330 @@
-# ADAG - AI-Driven Architecture Guardrail
+# ADAG — AI-Driven Architecture Guardrail
 
-**Phase 1: Deletion Protection Checker**
+A multi-agent AI system that acts as a **virtual principal engineer** — scanning Terraform infrastructure-as-code against your organisation's policy standards and returning intelligent, actionable audit results.
 
-An intelligent, multi-agent system that audits infrastructure-as-code (IaC) files for compliance with architecture standards. Phase 1 focuses on checking AWS database resources for deletion protection.
-
-## 🎯 Overview
-
-ADAG uses LangGraph and AWS Bedrock (Claude Sonnet 4.5) to automatically review Terraform files and identify policy violations. It's designed with abstraction layers to support multiple LLM providers and database backends.
-
-### Key Features
-
-- ✅ **Automated Policy Checking**: Scans Terraform files for deletion protection compliance
-- ✅ **Multi-Agent Architecture**: Separate agents for parsing and auditing
-- ✅ **Stateful Workflows**: Uses LangGraph for persistent, resumable workflows
-- ✅ **Structured Output**: Pydantic models ensure type-safe, validated results
-- ✅ **Provider Abstraction**: Easy to swap LLM providers or databases
-- ✅ **Detailed Reporting**: Clear violation reports with remediation hints
-
-## 📋 Prerequisites
-
-- Python 3.11 or higher
-- AWS Account with Bedrock access
-- AWS CLI configured with appropriate credentials
-- Access to Claude Sonnet 4.5 model in AWS Bedrock
-
-## 🚀 Installation
-
-### 1. Clone the Repository
-
-```bash
-cd /home/stahir/projects/arch_agent/arch_agent_1
-```
-
-### 2. Create Virtual Environment
-
-```bash
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-```
-
-### 3. Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Configure Environment
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` for your chosen provider. Three options are supported:
+Built to explore and demonstrate: **LangGraph** · **Multi-Agent Systems** · **RAG** · **MCP** · **LLM Provider Abstraction**
 
 ---
 
-#### Option A — GitHub Copilot (recommended, no AWS needed)
+## What it does
 
-Requires an active [GitHub Copilot subscription](https://github.com/features/copilot/plans).
-
-**Step 1:** Install the GitHub CLI and authenticate:
+ADAG reads your `.tf` files, checks them against 10 built-in compliance policies (or your own), and reports violations with remediation hints. It runs as a CLI tool, a Python library, or an MCP server that any AI assistant can call.
 
 ```bash
-# Ubuntu/Debian
-sudo apt install gh
-
-# macOS
-brew install gh
+pip install adag
+adag scan ./infra/
 ```
+
+```
+File: infra/database.tf  |  Resources: 3  |  Violations: 2
+
+[HIGH]   aws_db_instance / main        → delete_protection: missing deletion_protection = true
+[MEDIUM] aws_db_instance / main        → multi_az_requirement: multi_az not enabled
+
+Status: FAILED  (exit code 1)
+```
+
+## Key Features
+
+- **Multi-agent graph** — three specialised agents (Intake, Policy Analyst, Auditor) orchestrated by LangGraph
+- **Deterministic parsing** — the HCL parser never calls an LLM; regex extraction eliminates false positives from hallucinated attribute values. Automatically discovers auditable resource types from policies — add custom resources by creating new policies
+- **10 built-in policies** — deletion protection, encryption at rest, public access block, multi-AZ, backup retention, KMS key rotation, allowed regions, required tagging, naming conventions
+- **Four LLM providers** — AWS Bedrock, GitHub Copilot, HuggingFace, Ollama (fully local); all support **per-agent model selection** (`INTAKE_MODEL`, `AUDITOR_MODEL`) so you can use a fast small model for parsing and a powerful reasoning model for policy judgement
+- **Three output formats** — human-readable text, JSON, SARIF 2.1.0 (GitHub Advanced Security)
+- **MCP server** — any MCP-compatible AI assistant (Claude Desktop, VS Code Copilot) can call ADAG as a tool
+- **RAG mode** — index your internal architecture docs and query them semantically at scan time
+- **CI/CD ready** — exit codes 0/1/2, SARIF upload, GitHub Actions example included
+
+## Quick Start
+
+### 1. Install
+
+```bash
+pip install adag
+```
+
+### 2. Configure an LLM provider
+
+**GitHub Copilot (recommended — no AWS needed):**
 
 ```bash
 gh auth login --scopes 'copilot'
+gh auth status --show-token   # copy the ghu_... token
 ```
-
-**Step 2:** Get your token:
-
-```bash
-gh auth status --show-token
-# copy the ghu_... value
-```
-
-**Step 3:** Set in `.env`:
 
 ```ini
+# .env
 LLM_PROVIDER=github-copilot
 GITHUB_COPILOT_TOKEN=ghu_your_token_here
-
-# Default model (available on all Copilot plans)
-GITHUB_COPILOT_MODEL=gpt-4o
-
-# Optional: use different models per agent role
-# INTAKE_MODEL=gpt-4.1-mini      # fast parser (all plans)
-# AUDITOR_MODEL=claude-sonnet-4-5 # powerful auditor (Pro+ / Enterprise only)
-
-DB_PROVIDER=sqlite
-DB_PATH=./data/adag.db
 ```
 
----
-
-#### Option B — AWS Bedrock
-
-Requires an AWS account with Bedrock access to Claude Sonnet 4.5.
+**AWS Bedrock:**
 
 ```ini
+# .env
 LLM_PROVIDER=bedrock
 AWS_PROFILE=default
 AWS_REGION=us-east-1
-ANTHROPIC_MODEL=au.anthropic.claude-sonnet-4-5-20250929-v1:0
-
-DB_PROVIDER=sqlite
-DB_PATH=./data/adag.db
+BEDROCK_MODEL=anthropic.claude-sonnet-4-5-20250929-v1:0
 ```
 
-Verify your AWS setup:
-
-```bash
-aws sts get-caller-identity --profile default
-aws bedrock list-foundation-models --region us-east-1 --profile default
-```
-
----
-
-#### Option C — HuggingFace (free tier)
-
-Get a free token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens).
+Or use cross-region inference profiles (check availability in your region):
 
 ```ini
+# .env — inference profile example
+LLM_PROVIDER=bedrock
+AWS_PROFILE=default
+AWS_REGION=ap-southeast-2
+BEDROCK_MODEL=au.anthropic.claude-sonnet-4-5-20250929-v1:0
+```
+
+**Ollama (fully local, no API key):**
+
+```bash
+ollama pull deepseek-r1:8b
+```
+
+```ini
+# .env
+LLM_PROVIDER=ollama
+OLLAMA_MODEL=deepseek-r1:8b
+```
+
+**HuggingFace (free serverless inference):**
+
+```ini
+# .env
 LLM_PROVIDER=huggingface
 HF_TOKEN=hf_your_token_here
 HF_MODEL=Qwen/Qwen2.5-72B-Instruct
-
-# Optional per-agent overrides
-# INTAKE_MODEL=Qwen/Qwen2.5-7B-Instruct
-# AUDITOR_MODEL=Qwen/Qwen2.5-72B-Instruct
-
-DB_PROVIDER=sqlite
-DB_PATH=./data/adag.db
 ```
 
-## 📖 Usage
+#### Per-agent model selection (all providers)
 
-### Basic Usage
+ADAG applies the [LLM Capability Framework (LCF)](https://github.com/m3dcodie/LLM-Capability-Framework-LCF) to match each agent to the right model tier. Not every step in a multi-agent system needs the same depth of reasoning — assigning the wrong tier wastes cost and latency:
 
-Run the audit on a Terraform file:
+| Agent       | LCF Layer           | Task                                                         | Recommended model size                         |
+| ----------- | ------------------- | ------------------------------------------------------------ | ---------------------------------------------- |
+| **Intake**  | L1 — The Scout      | Deterministic structured JSON extraction from Terraform HCL  | 4B–14B distilled (fast, instruction-following) |
+| **Auditor** | L3 — The Strategist | Policy gap analysis, compliance judgement, remediation hints | 14B–70B logic-heavy (reasoning depth)          |
+
+Set `INTAKE_MODEL` and `AUDITOR_MODEL` independently to use the right tier for each job:
+
+```ini
+# .env — GitHub Copilot example
+LLM_PROVIDER=github-copilot
+GITHUB_COPILOT_TOKEN=ghu_your_token_here
+
+INTAKE_MODEL=gpt-4.1                        # fast — structured JSON extraction
+AUDITOR_MODEL=claude-sonnet-4.5             # powerful — policy reasoning
+```
+
+```ini
+# .env — AWS Bedrock example
+LLM_PROVIDER=bedrock
+AWS_PROFILE=default
+AWS_REGION=us-east-1
+
+INTAKE_MODEL=anthropic.claude-haiku-4-5-sonnet:0     # fast — distilled model
+AUDITOR_MODEL=anthropic.claude-sonnet-4-5-20250929-v1:0  # powerful — reasoning model
+```
+
+```ini
+# .env — HuggingFace example
+LLM_PROVIDER=huggingface
+HF_TOKEN=hf_your_token_here
+HF_MODEL=Qwen/Qwen2.5-72B-Instruct     # default fallback for any agent
+
+INTAKE_MODEL=Qwen/Qwen2.5-7B-Instruct          # fast — structured JSON extraction
+AUDITOR_MODEL=Qwen/Qwen2.5-72B-Instruct        # powerful — policy reasoning
+```
+
+```ini
+# .env — Ollama example
+LLM_PROVIDER=ollama
+OLLAMA_MODEL=deepseek-r1:8b             # default fallback
+
+INTAKE_MODEL=qwen2.5:7b                 # fast local model
+AUDITOR_MODEL=deepseek-r1:32b           # stronger reasoning model
+```
+
+If `INTAKE_MODEL` or `AUDITOR_MODEL` are unset, both agents use the provider default.
+
+### 3. Scan
+
+`adag scan` accepts **one path** — either a single `.tf` file or a directory. When given a directory, it scans **all `.tf` files recursively** (including subdirectories). It does not accept multiple paths in a single call.
+
+```
+your-repo/
+├── infra/
+│   ├── main.tf          ← scanned
+│   ├── variables.tf     ← scanned
+│   └── modules/
+│       └── rds/
+│           └── main.tf  ← scanned (recursive)
+```
 
 ```bash
-python main.py <path-to-terraform-file>
+# Single file — useful when you only want to check one resource
+adag scan ./infra/main.tf
+
+# Directory — scans all .tf files recursively (most common in CI)
+adag scan ./infra/
+
+# Multiple separate folders — run once per folder
+adag scan ./infra/networking/
+adag scan ./infra/databases/
+
+# JSON output
+adag scan ./infra/ --format json
+
+# SARIF for GitHub Advanced Security
+adag scan ./infra/ --format sarif > results.sarif
+
+# Use a custom policies folder instead of the built-in bundle
+adag scan ./infra/ --policies-dir ./my-org-policies/
+
+# Fully offline — skip RAG even if USE_RAG=true in .env
+adag scan ./infra/ --no-rag
 ```
-
-### Example: Test with Fixtures
-
-**Test with non-compliant code (should fail):**
-
-```bash
-python main.py tests/fixtures/bad_terraform.tf
-```
-
-Expected output:
-```
-======================================================================
-  ADAG - AI-Driven Architecture Guardrail
-  Phase 1: Deletion Protection Checker
-======================================================================
-
-Reading file: tests/fixtures/bad_terraform.tf
-Initializing ADAG system...
-✓ System initialized
-
-Running audit on tests/fixtures/bad_terraform.tf...
-----------------------------------------------------------------------
-
-======================================================================
-AUDIT RESULTS
-======================================================================
-
-Status: ✗ FAILED
-File: tests/fixtures/bad_terraform.tf
-Resources Analyzed: 2
-Violations Found: 2
-
-----------------------------------------------------------------------
-VIOLATIONS
-----------------------------------------------------------------------
-
-1. 🔴 [HIGH] main
-   Type: aws_db_instance
-   Issue: Database instance does not have deletion protection enabled
-   Line: 3
-   Fix: Add 'deletion_protection = true' to the resource
-
-2. 🔴 [HIGH] aurora
-   Type: aws_rds_cluster
-   Issue: Database cluster has deletion protection explicitly disabled
-   Line: 23
-   Fix: Change 'deletion_protection = false' to 'deletion_protection = true'
-
-======================================================================
-```
-
-**Test with compliant code (should pass):**
-
-```bash
-python main.py tests/fixtures/good_terraform.tf
-```
-
-Expected output:
-```
-======================================================================
-AUDIT RESULTS
-======================================================================
-
-Status: ✓ PASSED
-File: tests/fixtures/good_terraform.tf
-Resources Analyzed: 3
-Violations Found: 0
-
-======================================================================
-```
-
-### Exit Codes
-
-- `0`: Audit passed (no violations)
-- `1`: Audit failed (violations found)
-- `2`: Error during execution
-
-## 🧪 Running Tests
-
-Run the test suite:
-
-```bash
-pytest tests/ -v
-```
-
-Run with coverage:
-
-```bash
-pytest tests/ --cov=. --cov-report=html
-```
-
-Run specific test:
-
-```bash
-pytest tests/test_adag.py::TestAuditorAgent::test_auditor_with_violations -v
-```
-
-## 🏗️ Architecture
-
-### Project Structure
-
-```
-/adag-system
-├── agents/
-│   ├── __init__.py
-│   ├── intake.py           # Terraform parser agent
-│   └── auditor.py          # Policy compliance checker
-├── core/
-│   ├── __init__.py
-│   ├── llm_provider.py     # LLM provider abstraction
-│   ├── bedrock_provider.py # AWS Bedrock implementation
-│   ├── database_provider.py # Database abstraction
-│   ├── sqlite_provider.py  # SQLite implementation
-│   ├── state.py            # LangGraph state schema
-│   └── graph.py            # Workflow construction
-├── models/
-│   ├── __init__.py
-│   └── violations.py       # Pydantic models
-├── tests/
-│   ├── __init__.py
-│   ├── test_adag.py        # Unit tests
-│   └── fixtures/
-│       ├── bad_terraform.tf
-│       └── good_terraform.tf
-├── policies/
-│   └── delete_protection.md # Policy documentation
-├── .env.example
-├── .gitignore
-├── requirements.txt
-├── main.py                 # Entry point
-└── README.md
-```
-
-### Workflow
-
-```
-┌─────────────┐
-│   Start     │
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│   Intake    │  Parse Terraform code
-│   Agent     │  Extract database resources
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│  Auditor    │  Check deletion protection
-│   Agent     │  Generate violations
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐
-│   Report    │  Display results
-│   Results   │  Exit with status code
-└─────────────┘
-```
-
-### Key Components
-
-1. **LLM Provider Abstraction** ([`core/llm_provider.py`](core/llm_provider.py:1))
-   - Factory pattern for LLM providers
-   - Currently supports AWS Bedrock
-   - Easy to add OpenAI, Anthropic Direct, etc.
-
-2. **Database Provider Abstraction** ([`core/database_provider.py`](core/database_provider.py:1))
-   - Factory pattern for checkpoint storage
-   - Currently supports SQLite
-   - Easy to add PostgreSQL, Redis, etc.
-
-3. **Intake Agent** ([`agents/intake.py`](agents/intake.py:1))
-   - Parses Terraform files
-   - Extracts database resources
-   - Uses structured output with Pydantic
-
-4. **Auditor Agent** ([`agents/auditor.py`](agents/auditor.py:1))
-   - Checks deletion protection policy
-   - Generates violation reports
-   - Assigns severity levels
-
-5. **LangGraph Workflow** ([`core/graph.py`](core/graph.py:1))
-   - Orchestrates agent execution
-   - Manages state transitions
-   - Provides checkpointing
-
-## 🔧 Configuration
-
-### Switching LLM Providers
-
-To add a new LLM provider:
-
-1. Create a new provider class inheriting from [`LLMProvider`](core/llm_provider.py:10)
-2. Implement required methods
-3. Register with [`LLMFactory`](core/llm_provider.py:37)
-
-Example:
-```python
-from core.llm_provider import LLMProvider, LLMFactory
-
-class OpenAIProvider(LLMProvider):
-    def get_model(self, **kwargs):
-        # Implementation
-        pass
-    
-    # ... other methods
-
-LLMFactory.register_provider("openai", OpenAIProvider)
-```
-
-### Switching Database Providers
-
-Similar pattern for database providers - see [`core/database_provider.py`](core/database_provider.py:1)
-
-## 📊 Policy: Deletion Protection
-
-**Severity:** HIGH
-
-**Description:** All production database instances MUST have deletion protection enabled.
-
-**Applies to:**
-- `aws_db_instance`
-- `aws_rds_cluster`
-- `aws_db_cluster_instance`
-
-**Requirement:** `deletion_protection = true`
-
-See [`policies/delete_protection.md`](policies/delete_protection.md:1) for full policy details.
-
-## 🛣️ Roadmap
-
-### Phase 1: Standard Checker ✅ (Current)
-- Single policy check (deletion protection)
-- Basic LangGraph workflow
-- AWS Bedrock integration
-- SQLite persistence
-
-### Phase 2: Knowledge Base (Weeks 3-4)
-- RAG integration with vector database
-- Dynamic policy loading from documents
-- Multiple policy checks
-- Policy versioning
-
-### Phase 3: Multi-Agent Critique (Weeks 5-6)
-- Remediation agent (auto-fix generation)
-- Validator agent (false positive detection)
-- Human-in-the-loop approval
-- Git patch generation
-
-## 🤝 Contributing
-
-This is a leadership demonstration project. For production use:
-
-1. Add comprehensive error handling
-2. Implement retry logic with exponential backoff
-3. Add logging and observability
-4. Create CI/CD pipeline
-5. Add integration tests with real AWS Bedrock
-6. Implement rate limiting
-7. Add cost tracking for LLM calls
-
-## 📝 License
-
-This project is for demonstration and learning purposes.
-
-## 🙋 Support
-
-For issues or questions:
-1. Check the policy documentation in [`policies/`](policies/)
-2. Review test cases in [`tests/test_adag.py`](tests/test_adag.py:1)
-3. Examine fixture examples in [`tests/fixtures/`](tests/fixtures/)
-
-## 🎓 Architecture Decision Records
-
-### ADR-001: AWS Bedrock as Default LLM Provider
-**Decision:** Use AWS Bedrock with Claude Sonnet 4.5  
-**Rationale:** Enterprise-ready, no data retention, excellent code understanding  
-**Trade-off:** Requires AWS setup, but provides better security posture
-
-### ADR-002: Provider Abstraction Pattern
-**Decision:** Abstract LLM and database providers using factory pattern  
-**Rationale:** Enables easy switching between providers without code changes  
-**Trade-off:** Additional complexity, but critical for flexibility
-
-### ADR-003: Structured Output with Pydantic
-**Decision:** Force LLM to return Pydantic models  
-**Rationale:** Type safety, validation, eliminates parsing errors  
-**Trade-off:** Slightly more complex prompts, but much more reliable
-
-### ADR-004: SQLite for Phase 1
-**Decision:** Use SQLite for checkpoint storage  
-**Rationale:** Simple setup, no external dependencies for MVP  
-**Trade-off:** Not suitable for distributed systems, but perfect for Phase 1
 
 ---
 
-**Built with:** LangGraph • AWS Bedrock • Claude Sonnet 4.5 • Python 3.11+
+## Three Operating Modes
+
+| Mode              | How                                    | When                                      |
+| ----------------- | -------------------------------------- | ----------------------------------------- |
+| **CLI / Package** | `pip install adag && adag scan`        | CI/CD pipelines, local dev                |
+| **MCP Server**    | `python -m adag.mcp_server`            | Claude Desktop, VS Code Copilot           |
+| **Advanced RAG**  | `USE_RAG=true` + running microservices | 500+ policies, internal architecture docs |
+
+---
+
+## RAG Mode — Querying Your Own Architecture Standards
+
+By default ADAG loads all policies from the `policies/` directory into the LLM's context window. This works well for small-to-medium policy sets (up to ~100 docs) and requires no infrastructure.
+
+**RAG (Retrieval-Augmented Generation) mode** adds a vector database layer. Instead of sending every policy to the LLM, ADAG embeds the Terraform resource descriptions, performs a semantic similarity search against the stored policies, and sends only the most relevant chunks to the Auditor. This enables two things that context-window loading cannot do:
+
+1. **Scale beyond context limits** — hundreds or thousands of policy documents without hitting token limits
+2. **Query non-policy sources** — ingest your Confluence pages, Architecture Decision Records, Mermaid diagrams, or internal runbooks; the Auditor can reason against them the same way
+
+### How it works
+
+```
+Your docs (Confluence, ADRs, Markdown)
+        │
+        ▼
+  Ingest → Chunk → Embed → ChromaDB     ← one-time indexing
+                               │
+                    Scan time: │
+  Terraform resource description
+        │
+        ▼
+  Semantic query → top-k relevant policy chunks
+        │
+        ▼
+  Auditor LLM (sees only what's relevant, not everything)
+```
+
+### When you need RAG
+
+| Scenario                                   | RAG needed?                          |
+| ------------------------------------------ | ------------------------------------ |
+| Built-in 10 policies                       | No — context window is sufficient    |
+| Custom `policies/` folder, up to ~100 docs | No — still fits                      |
+| 500+ enterprise-wide policies              | Yes                                  |
+| Ingesting Confluence / ADRs / diagrams     | Yes — that is the ingestion use case |
+| Air-gapped / fully offline environment     | No — microservices require network   |
+
+### Enabling RAG mode
+
+```bash
+# 1. Start the RAG microservices (see docs/RAG_PIPELINE.md for Docker Compose)
+# 2. Index your policies
+python scripts/index_policies.py --policies-dir ./policies/
+
+# 3. Set env vars and scan
+USE_RAG=true
+CONTEXT_AUGMENTATION_URL=http://localhost:8000
+```
+
+```bash
+USE_RAG=true adag scan ./infra/
+```
+
+See [docs/RAG_PIPELINE.md](docs/RAG_PIPELINE.md) for the full setup guide, microservice reference, and Docker Compose file.
+
+---
+
+## MCP Server (AI Assistant Integration)
+
+Connect ADAG to Claude Desktop so it can check compliance mid-conversation:
+
+```json
+{
+  "mcpServers": {
+    "adag": {
+      "command": "python",
+      "args": ["-m", "adag.mcp_server"],
+      "env": {
+        "LLM_PROVIDER": "github-copilot",
+        "GITHUB_COPILOT_TOKEN": "ghu_your_token_here",
+        "USE_RAG": "false"
+      }
+    }
+  }
+}
+```
+
+Then ask Claude: _"Check my Terraform at `/home/me/infra/main.tf` for compliance issues."_
+
+---
+
+## Running Tests
+
+```bash
+# All unit tests (no LLM credentials needed — all LLM calls are mocked)
+pytest
+
+# With coverage
+pytest --cov=adag --cov=agents --cov=core --cov=models --cov-report=term-missing
+```
+
+---
+
+## Technology Stack
+
+| Category            | Technology                                                 |
+| ------------------- | ---------------------------------------------------------- |
+| Agent orchestration | LangGraph 0.2                                              |
+| LLM providers       | AWS Bedrock, GitHub Copilot, HuggingFace, Ollama           |
+| Data models         | Pydantic v2                                                |
+| CLI                 | Click                                                      |
+| MCP server          | FastMCP                                                    |
+| Checkpointing       | LangGraph SQLite                                           |
+| RAG pipeline        | ChromaDB + HuggingFace Embeddings (separate microservices) |
+| Output formats      | Text, JSON, SARIF 2.1.0                                    |
+
+---
+
+## Documentation
+
+| Document                                                   | Description                                  |
+| ---------------------------------------------------------- | -------------------------------------------- |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)               | System design, agent graph, design decisions |
+| [docs/FUNCTIONALITY.md](docs/FUNCTIONALITY.md)             | Inputs, outputs, CI/CD integration           |
+| [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md)         | Full install and provider setup guide        |
+| [docs/CONFIGURATION.md](docs/CONFIGURATION.md)             | All environment variables                    |
+| [docs/POLICIES.md](docs/POLICIES.md)                       | Built-in policies, writing custom policies   |
+| [docs/RAG_PIPELINE.md](docs/RAG_PIPELINE.md)               | Advanced RAG mode and microservices          |
+| [docs/MCP.md](docs/MCP.md)                                 | MCP server, Claude Desktop, VS Code Copilot  |
+| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)               | Adding providers, agents, policies           |
+| [docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md) | API and data model reference                 |
+| [VISION.md](VISION.md)                                     | Why this exists and what it is teaching      |
+
+---
+
+## License
+
+MIT — free to use, modify, and distribute.
