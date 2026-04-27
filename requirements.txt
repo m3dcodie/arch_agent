@@ -5,7 +5,7 @@ langgraph==0.2.45
 langchain-ollama>=0.2.0
 langgraph-checkpoint-sqlite>=1.0.0
 langchain-core==0.3.15
-langchain-aws==0.2.6
+langchain-aws==1.4.5
 
 # AWS Bedrock
 boto3==1.35.36
