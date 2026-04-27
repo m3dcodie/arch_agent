@@ -1,0 +1,24 @@
+# Prompt Contracts (imported from https://github.com/m3dcodie/prompt-contract)
+
+# Prompt Contracts
+
+> A formal framework for managing LLM context and logic through structured "Contracts" and "Cognitive Archetypes."
+
+This project provides a professional alternative to "Vibe Coding" by treating LLM interactions as governed system architecture. It includes foundational theory, structured contract layers, and execution protocols designed for deterministic AI engineering.
+
+## Core Framework
+- [Foundation](/1_Foundation): Theory of Intelligence Containment and why models hallucinate.
+- [Contract Structure](/2_Contract_Structure): Detailed specifications for Scope, Role, Objective, Reasoning, and Language layers.
+- [Execution Protocols](/3_Execution_Protocols): High-reliability workflows including Spec-Driven Development, Task Decomposition, and TDD.
+
+## Implementation & Tools
+- [Model Mapping](/4_Model_Mapping): Framework for assigning tasks to Reasoning-Dense vs. Instruction-Following models.
+- [Master Templates](/5_Examples): Production-ready contract templates for daily development (Feature Dev, Debugging, PR Review).
+
+## Best Practices
+- **Order Matters:** Place Role and Language contracts at the top to optimize for **Prompt Caching**.
+- **Version Locking:** Always pin specific model snapshots to prevent instruction drift.
+- **Context Hygiene:** Use the `Context_Reset_Protocol` to purge "context rot" and maintain high reasoning quality.
+
+**Maintainer:** Suhail T (https://github.com/m3dcodie)
+**License:** MIT
