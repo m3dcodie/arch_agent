@@ -1,5 +1,5 @@
 # Core LangGraph and LangChain
-langgraph==0.2.45
+langgraph==1.1.9
 
 # Ollama (local model testing)
 langchain-ollama>=0.2.0
