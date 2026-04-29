@@ -1,0 +1,342 @@
+openapi: 3.0.3
+info:
+  title: Context Augmentation Service API
+  description: REST API for augmenting user queries with relevant context from RAG pipeline
+  version: 1.0.0
+servers:
+  - url: http://localhost:8000
+paths:
+  /ingest/{appid}:
+    post:
+      summary: Ingest documents for an application
+      parameters:
+        - name: appid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Application ID for scoping operations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                source_type:
+                  type: string
+                  description: Source type (e.g., local, direct)
+                  enum: [local, direct]
+                config:
+                  type: object
+                  description: |
+                    Configuration for the source.
+                    For 'local': {"paths": ["/path/to/file.txt"]}
+                    For 'direct': {"documents": [{"content": "...", ...}]}
+              required:
+                - source_type
+                - config
+      responses:
+        "200":
+          description: Ingestion result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  documents:
+                    type: array
+                    items:
+                      type: object
+          examples:
+            direct:
+              summary: Direct document ingestion
+              value:
+                status: success
+                documents:
+                  - content: "Document 1 text"
+                    meta:
+                      title: "Doc 1"
+                    doc_id: "direct_0"
+                  - content: "Document 2 text"
+                    doc_id: "direct_1"
+        "400":
+          description: Invalid request
+        "500":
+          description: Internal server error
+  /chunk/{appid}:
+    post:
+      summary: Chunk a document for an application (requires full document object)
+      parameters:
+        - name: appid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Application ID for scoping operations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                document:
+                  type: object
+                  description: |
+                    Full document object to chunk. Must include all fields (e.g., id, title, content, category, doc_id, etc.), not just a document_id.
+                  example:
+                    id: testdoc1
+                    title: Test Policy
+                    content: All employees must comply with security policies. MFA is required for all logins.
+                    category: security
+                    doc_id: direct_0
+                chunker_type:
+                  type: string
+                  description: Chunker type (e.g., langchain)
+                  example: langchain
+                chunker_config:
+                  type: object
+                  description: Chunker configuration (e.g., chunk_size, chunk_overlap)
+                  example:
+                    chunk_size: 200
+                    chunk_overlap: 50
+              required:
+                - document
+      responses:
+        "200":
+          description: Chunking result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  chunks:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          description: Invalid request
+        "500":
+          description: Internal server error
+  /embed/{appid}:
+    post:
+      summary: Embed texts for an application
+      parameters:
+        - name: appid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Application ID for scoping operations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                texts:
+                  type: array
+                  items:
+                    type: string
+                  description: |
+                    List of strings to embed. Do not pass chunk dicts—extract the 'chunk' field from each chunk and send as a list of strings.
+                  example:
+                    - "All employees must comply with security policies. MFA is required for all logins."
+                embedder_config:
+                  type: object
+                  description: Embedder configuration
+                  example: {}
+              required:
+                - texts
+      description: |
+        The embedder_type is not user-supplied and always defaults to 'sentence_transformers'.
+      responses:
+        "200":
+          description: Embedding result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  embeddings:
+                    type: array
+                    items:
+                      type: array
+                      items:
+                        type: number
+        "400":
+          description: Invalid request
+        "500":
+          description: Internal server error
+  /add_vectors/{appid}:
+    post:
+      summary: Add vectors to vector DB for an application
+      parameters:
+        - name: appid
+              properties:
+                vectors:
+                  type: array
+                  items:
+                    type: array
+                    items:
+                      type: number
+                  description: |
+                    Vectors to add. Must be a non-empty list of embeddings. Do not call this endpoint if you have no embeddings to add.
+                  example:
+                    - [0.1, 0.2, 0.3, ...]
+                metadatas:
+                  type: array
+                  items:
+                    type: object
+                  description: Metadata for vectors
+                  example:
+                    - { "text": "chunk text", "chunk_index": 0 }
+                adapter_config:
+                  type: object
+                  description: Adapter configuration (e.g., collection_name)
+                  example: { "collection_name": "my_collection" }
+              required:
+                - vectors
+                - metadatas
+      description: |
+        Do not call this endpoint if the embeddings/vectors list is empty. The service will raise an error if vectors is [].
+        The adapter_type is not user-supplied and always defaults to 'chromadb'.
+                  type: string
+                  description: Adapter type
+                  example: chromadb
+                adapter_config:
+                  type: object
+                  description: Adapter configuration
+                  example: { "collection_name": "my_collection" }
+              required:
+                - vectors
+                - metadatas
+      description: |
+        Do not call this endpoint if the embeddings/vectors list is empty. The service will raise an error if vectors is [].
+      responses:
+        "200":
+          description: Add vectors result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+        "400":
+          description: Invalid request
+        "500":
+          description: Internal server error
+  /query/{appid}:
+    post:
+      summary: Query vector DB for an application
+      parameters:
+        - name: appid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Application ID for scoping operations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query_vector:
+                  type: array
+                  items:
+                    type: number
+                  description: Query vector
+                top_k:
+                  type: integer
+                  description: Number of results
+                adapter_config:
+                  type: object
+                  description: Adapter configuration (e.g., collection_name)
+              required:
+                - query_vector
+      description: |
+        The adapter_type is not user-supplied and always defaults to 'chromadb'.
+      responses:
+        "200":
+          description: Query result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+        "400":
+          description: Invalid request
+        "500":
+          description: Internal server error
+  /context-augment/{appid}:
+    post:
+      summary: Augment user question with relevant context
+      parameters:
+        - name: appid
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Application ID for scoping operations
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                question:
+                  type: string
+                  description: User's question or prompt
+                metadata:
+                  type: object
+                  description: Optional metadata for context retrieval
+              required:
+                - question
+      responses:
+        "200":
+          description: Augmented context and relevant chunks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  augmented_context:
+                    type: string
+                    description: Enriched context for LLM
+                  relevant_chunks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        document:
+                          type: string
+                        metadata:
+                          type: object
+                        distance:
+                          type: number
+        "400":
+          description: Invalid request
+        "500":
+          description: Internal server error
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+security:
+  - ApiKeyAuth: []

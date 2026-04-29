@@ -1,0 +1,67 @@
+# LLMs and Model Mapping — arch_agent
+
+This file documents recommended LLM providers and model mappings used by this repository (arch_agent).
+Place this file in the repository root as llms.txt. Keep it up to date when you change model choices.
+
+Summary
+- Purpose: map agent roles to suggested models and record practical configuration notes for reproducibility.
+- Do not commit API tokens. Use environment variables or CI secrets.
+
+Supported providers
+- Hugging Face (server or router)
+  - Configure: set HF_TOKEN and HF_MODEL in .env or environment.
+  - Example model id: Qwen/Qwen2.5-7B-Instruct (fast), Qwen/Qwen2.5-72B-Instruct (reasoning)
+
+- Ollama (local)
+  - Configure: OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_NUM_PREDICT
+  - Use for offline/local inference when available.
+
+- GitHub Copilot
+  - Configure: GITHUB_COPILOT_TOKEN (OAuth token) and GITHUB_COPILOT_MODEL
+  - Note: requires a Copilot subscription for some models. Use gh to obtain tokens: `gh auth status --show-token`.
+
+- Bedrock (AWS)
+  - Configure via AWS credentials and the repo LLM_PROVIDER=bedrock when using Bedrock-specific models.
+
+Agent role mapping (recommended)
+- Intake (L1 — Scout / Processor)
+  - Goal: deterministic structured extraction (JSON), low latency, minimal hallucination.
+  - Recommended HF: Qwen/Qwen2.5-7B-Instruct
+  - Settings: temperature 0.0-0.1, low max tokens, prefer instruction-following models.
+
+- Auditor (L3 — Strategist / Architect)
+  - Goal: deep reasoning, policy analysis, synthesis.
+  - Recommended HF: Qwen/Qwen2.5-72B-Instruct or other large reasoning-focused model.
+  - Settings: higher max tokens, temperature 0.0-0.2 depending on exploration needs.
+
+- Policy Analyst / Other L2 roles
+  - Goal: balanced reasoning and instruction following.
+  - Recommended HF: mid-large models (13B–32B family) depending on cost and latency.
+
+How to override per-agent models
+- You can set per-agent environment variables (see .env.example):
+  - INTAKE_MODEL — overrides HF_MODEL for the intake agent
+  - AUDITOR_MODEL — overrides HF_MODEL for the auditor agent
+  - HF_MODEL — default HF model for agents that don't have per-agent overrides
+
+Best practices
+- Version Locking: always pin full model identifiers (e.g., Qwen/Qwen2.5-7B-Instruct). Avoid vague names like "qwen".
+- Context Hygiene: use a context reset protocol between unrelated sessions to prevent context rot.
+- Prompt Engineering: place Role and Language contracts toward the top of prompts for caching and stability.
+- Determinism: for structured outputs, set temperature to 0–0.1 and include strict schema instructions.
+
+RAG and embeddings
+- This repo supports RAG (Chroma) via RAG_PROVIDER and CHROMA_PERSIST_DIR in .env/.env.example.
+- Choose an embeddings model compatible with your provider and pin its identifier.
+- For large document sets, chunk documents and use semantic retrieval to stay within context limits.
+
+Security
+- Never commit API tokens or secrets. .env is ignored by default. Use GitHub Actions secrets for CI.
+- If a token is accidentally exposed, rotate it immediately and, if needed, scrub history.
+
+Provenance and license
+- Based on the Prompt Contracts project by Suhail T (m3dcodie); adapted for arch_agent.
+- License: MIT (see LICENSE in repo root).
+
+Maintainer
+- M T <m3d.suhail@gmail.com>
