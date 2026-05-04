@@ -1,351 +1,36 @@
 """
-Auditor agent - Checks resources against retrieved policies (Phase 2: RAG-enabled).
+Auditor agent — checks parsed resources against retrieved policies.
 """
 
 import json
-import re
-import time
+import logging
 import uuid
-from typing import Dict, Any, List, Type, TypeVar
+from typing import Dict, Any, List
+
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.language_models import BaseChatModel
-from pydantic import BaseModel
 
+from agents.prompts import FALLBACK_AUDITOR_PROMPT, build_dynamic_prompt
 from core.state import AgentState
+from core.llm_utils import invoke_structured
 from models.violations import (
     Violation,
     ViolationList,
-    Severity,
     AuditStatus,
     TerraformResource,
 )
-from models.policy import Policy
 
-T = TypeVar("T", bound=BaseModel)
-
-_RATE_LIMIT_SIGNALS = ("429", "rate limit", "too many requests", "ratelimit")
+logger = logging.getLogger(__name__)
 
 
-def _is_rate_limit(exc: Exception) -> bool:
-    msg = str(exc).lower()
-    return any(s in msg for s in _RATE_LIMIT_SIGNALS)
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
-
-def _invoke_structured(
-    llm: BaseChatModel, prompt: ChatPromptTemplate, inputs: dict, schema: Type[T]
-) -> T:
+def _format_resources_for_prompt(resources: list) -> str:
     """
-    Invoke the LLM and parse the result into a Pydantic model.
-
-    Tries with_structured_output first; if the provider doesn't support it
-    (e.g. Ollama, or HF router models), falls back to plain invoke + JSON extraction.
-    Retries up to 3 times with exponential backoff on rate-limit (429) errors.
-    """
-
-    def _plain_invoke():
-        chain = prompt | llm
-        response = chain.invoke(inputs)
-        raw = response.content if hasattr(response, "content") else str(response)
-        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
-        raw = re.sub(r"```(?:json)?", "", raw).strip()
-        match = re.search(r"\{.*\}", raw, re.DOTALL)
-        if not match:
-            raise ValueError(f"No JSON found in model output: {raw[:300]}")
-        return schema(**json.loads(match.group()))
-
-    last_exc: Exception = RuntimeError("No attempts made")
-    for attempt in range(3):
-        try:
-            # OpenAI-compatible providers (including GitHub Copilot) require
-            # method="function_calling" — schemas don't pass the strict
-            # structured-output validator in langchain-openai>=0.3.
-            from langchain_openai import ChatOpenAI
-
-            structured_kwargs = (
-                {"method": "function_calling"} if isinstance(llm, ChatOpenAI) else {}
-            )
-            chain = prompt | llm.with_structured_output(schema, **structured_kwargs)
-            return chain.invoke(inputs)
-        except Exception as exc:
-            if _is_rate_limit(exc):
-                wait = 15 * (2**attempt)  # 15s, 30s, 60s
-                print(
-                    f"[AUDITOR] Rate limited — retrying in {wait}s (attempt {attempt + 1}/3)"
-                )
-                time.sleep(wait)
-                last_exc = exc
-                continue
-            # Non-rate-limit error: fall back to plain invoke immediately
-            try:
-                return _plain_invoke()
-            except Exception as plain_exc:
-                if _is_rate_limit(plain_exc):
-                    wait = 15 * (2**attempt)
-                    print(f"[AUDITOR] Rate limited (plain) — retrying in {wait}s")
-                    time.sleep(wait)
-                    last_exc = plain_exc
-                    continue
-                raise plain_exc
-    raise last_exc
-
-
-# Fallback prompt for when RAG is disabled or no policies retrieved
-FALLBACK_AUDITOR_PROMPT = """You are a security auditor specializing in database infrastructure compliance.
-
-Your task is to check if database resources have deletion protection enabled.
-
-POLICY: All production database instances MUST have deletion_protection = true
-
-Resources to audit:
-{resources_json}
-
-CRITICAL RULES — READ BEFORE AUDITING:
-1. The resource JSON above is the GROUND TRUTH. Trust it completely.
-2. If deletion_protection is present and set to `true`, the resource IS compliant — do NOT flag it.
-3. ONLY flag a resource if deletion_protection is explicitly `false` or completely absent.
-4. Do NOT infer anything from resource names, descriptions, or any other source.
-
-IMPORTANT S3 RULES:
-- S3 encryption is configured via a SEPARATE "aws_s3_bucket_server_side_encryption_configuration" resource.
-  If such a resource exists referencing the bucket, the bucket IS encrypted — do NOT flag it.
-- S3 public access is configured via a SEPARATE "aws_s3_bucket_public_access_block" resource.
-  If such a resource exists with block_public_acls=true, the bucket IS compliant — do NOT flag it.
-- Only flag an aws_s3_bucket if no companion encryption/public-access-block resource exists in the list above.
-
-For each resource, check if:
-1. The resource is a database (aws_db_instance, aws_rds_cluster, etc.)
-2. The "deletion_protection" attribute exists
-3. The "deletion_protection" attribute is set to true
-
-For any violations found, return them in this format:
-{{
-  "violations": [
-    {{
-      "id": "unique-id",
-      "resource_type": "aws_db_instance",
-      "resource_name": "resource_name",
-      "severity": "HIGH",
-      "policy_ref": "delete_protection",
-      "description": "Clear description of the violation",
-      "line_number": 10,
-      "remediation_hint": "Add 'deletion_protection = true' to the resource block"
-    }}
-  ]
-}}
-
-If all resources are compliant, return: {{"violations": []}}
-
-Be strict: if deletion_protection is missing or set to false, it's a HIGH severity violation.
-"""
-
-
-def auditor_node(state: AgentState, llm: BaseChatModel) -> Dict[str, Any]:
-    """
-    Audit parsed resources against retrieved policies (Phase 2: RAG-enabled).
-
-    This agent now uses policies retrieved by the policy_analyst node to
-    perform dynamic, multi-policy auditing instead of hardcoded rules.
-
-    Args:
-        state: Current agent state
-        llm: Language model instance
-
-    Returns:
-        Dict with updated state fields
-    """
-    try:
-        parsed_resources = state.get("parsed_resources", [])
-        retrieved_policies = state.get("retrieved_policies", [])
-
-        # If no resources to audit, pass the audit
-        if not parsed_resources:
-            return {
-                "violations": [],
-                "current_node": "auditor",
-                "status": AuditStatus.PASSED,
-                "messages": ["[AUDITOR] No database resources found - audit passed"],
-            }
-
-        # Convert resources to JSON for the prompt
-        resources_json = _format_resources_for_prompt(parsed_resources)
-
-        # Build prompt based on whether we have retrieved policies
-        if retrieved_policies:
-            # Phase 2: Dynamic prompt from retrieved policies
-            prompt_text = _build_dynamic_prompt(parsed_resources, retrieved_policies)
-            message_prefix = f"[AUDITOR] Auditing against {len(retrieved_policies)} retrieved policies"
-        else:
-            # Fallback: Use hardcoded prompt — pass raw template (with {{ }} escapes)
-            # directly to ChatPromptTemplate; don't pre-render via .format()
-            prompt_text = FALLBACK_AUDITOR_PROMPT
-            message_prefix = (
-                "[AUDITOR] Using fallback policy (RAG disabled or no policies found)"
-            )
-
-        # Create prompt
-        prompt = ChatPromptTemplate.from_template(prompt_text)
-
-        # Invoke with provider-aware structured output
-        result = _invoke_structured(
-            llm, prompt, {"resources_json": resources_json}, ViolationList
-        )
-
-        # Extract violations
-        violations = result.violations if result else []
-
-        # Ensure each violation has a unique ID
-        for i, violation in enumerate(violations):
-            if not violation.id or violation.id == "unique-id":
-                violation.id = f"V{str(uuid.uuid4())[:8]}"
-
-        # Determine status
-        if violations:
-            status = AuditStatus.FAILED
-            message = f"[AUDITOR] Found {len(violations)} violation(s)"
-        else:
-            status = AuditStatus.PASSED
-            message = "[AUDITOR] All resources are compliant"
-
-        return {
-            "violations": [
-                v.model_dump() if hasattr(v, "model_dump") else v for v in violations
-            ],
-            "current_node": "auditor",
-            "status": status,
-            "messages": [message_prefix, message],
-        }
-
-    except Exception as e:
-        return {
-            "violations": [],
-            "current_node": "auditor",
-            "status": AuditStatus.ERROR,
-            "error_message": f"Auditor failed: {str(e)}",
-            "messages": [f"[AUDITOR] ERROR: {str(e)}"],
-        }
-
-
-def _build_dynamic_prompt(
-    resources: List[TerraformResource], policies: List[Policy]
-) -> str:
-    """
-    Build a dynamic audit prompt from retrieved policies.
-
-    Args:
-        resources: List of parsed Terraform resources
-        policies: List of retrieved Policy objects
-
-    Returns:
-        Formatted prompt string with policies and resources
-    """
-    prompt = """You are a security auditor specializing in infrastructure compliance.
-
-Your task is to audit the provided Terraform resources against the following policies.
-
-"""
-
-    # Add each policy to the prompt
-    prompt += "=" * 80 + "\n"
-    prompt += "POLICIES TO ENFORCE:\n"
-    prompt += "=" * 80 + "\n\n"
-
-    for i, policy in enumerate(policies, 1):
-        # Policy may be a dict (serialized for checkpoint) or a Pydantic object
-        if isinstance(policy, dict):
-            title = policy.get("title", "Unknown")
-            pol_id = policy.get("id", "unknown")
-            severity = policy.get("severity", "MEDIUM")
-            description = policy.get("description", "")
-            requirements = policy.get("requirements", "")
-            remediation = policy.get("remediation", "")
-        else:
-            title = policy.title
-            pol_id = policy.id
-            severity = policy.severity
-            description = policy.description
-            requirements = policy.requirements
-            remediation = policy.remediation
-
-        # Escape braces in policy content so ChatPromptTemplate doesn't treat
-        # {something} in policy text as template variables.
-        description = description.replace("{", "{{").replace("}", "}}")
-        requirements = requirements.replace("{", "{{").replace("}", "}}")
-        if remediation:
-            remediation = remediation.replace("{", "{{").replace("}", "}}")
-
-        prompt += f"### Policy {i}: {title}\n"
-        prompt += f"**Policy ID:** `{pol_id}`\n"
-        prompt += f"**Severity:** {severity}\n"
-        prompt += f"**Description:** {description}\n\n"
-
-        # Include requirements (truncated if too long)
-        requirements = requirements[:1000] if len(requirements) > 1000 else requirements
-        prompt += f"**Requirements:**\n{requirements}\n\n"
-
-        if remediation:
-            prompt += f"**Remediation:** {remediation}\n\n"
-
-        prompt += "-" * 80 + "\n\n"
-
-    # Add resources section
-    prompt += "=" * 80 + "\n"
-    prompt += "RESOURCES TO AUDIT:\n"
-    prompt += "=" * 80 + "\n\n"
-    prompt += "{resources_json}\n\n"
-
-    # Add instructions
-    prompt += """
-CRITICAL RULES — READ BEFORE AUDITING:
-1. The resource JSON above is the GROUND TRUTH. Trust it completely.
-2. If an attribute is present and set to `true`, the resource IS compliant for that check — do NOT flag it.
-3. If an attribute is present and set to a number >= threshold, the resource IS compliant — do NOT flag it.
-4. ONLY flag a resource if the attribute is EXPLICITLY set to a non-compliant value, OR is completely absent.
-5. Do NOT infer or assume missing attributes from resource names, descriptions, or any other source.
-
-IMPORTANT S3 RULES:
-- S3 encryption is configured via a SEPARATE "aws_s3_bucket_server_side_encryption_configuration" resource.
-  If such a resource exists referencing the bucket, the bucket IS encrypted — do NOT flag it for missing encryption.
-- S3 public access is configured via a SEPARATE "aws_s3_bucket_public_access_block" resource.
-  If such a resource exists with block_public_acls=true, the bucket IS compliant — do NOT flag it for public access.
-- Only flag an aws_s3_bucket if no companion encryption/public-access-block resource exists in the resource list above.
-
-INSTRUCTIONS:
-1. Check each resource against ALL applicable policies above
-2. For each violation found, identify:
-   - Which policy was violated (use the policy_ref field with the Policy ID)
-   - The specific resource and attribute causing the violation
-   - The severity level from the policy
-   - A clear description of what's wrong
-   - A remediation hint on how to fix it
-
-Return violations in this JSON format:
-{{
-  "violations": [
-    {{
-      "id": "unique-id",
-      "resource_type": "aws_db_instance",
-      "resource_name": "resource_name",
-      "severity": "HIGH",
-      "policy_ref": "policy_id_from_above",
-      "description": "Clear description of the violation",
-      "line_number": 10,
-      "remediation_hint": "How to fix this violation"
-    }}
-  ]
-}}
-
-If all resources are compliant with all policies, return: {{"violations": []}}
-
-Be thorough: check each resource against each applicable policy.
-"""
-
-    return prompt
-
-
-def _format_resources_for_prompt(resources: List[TerraformResource]) -> str:
-    """Format resources as JSON string for the prompt.
-
-    Accepts either TerraformResource objects or plain dicts (from checkpoint).
+    Serialise a list of TerraformResource objects or raw dicts to a JSON string
+    suitable for embedding in an LLM prompt.
     """
     resources_data = []
     for resource in resources:
@@ -360,7 +45,94 @@ def _format_resources_for_prompt(resources: List[TerraformResource]) -> str:
                     "line_number": resource.line_number,
                 }
             )
-
-    import json
-
     return json.dumps(resources_data, indent=2)
+
+
+def _assign_violation_ids(violations: List[Violation]) -> None:
+    """
+    Assign a unique, deterministic ID to any violation that has a placeholder ID.
+
+    Uses a short UUID suffix to avoid collisions across concurrent audit runs.
+    Mutates the list in place.
+    """
+    run_prefix = uuid.uuid4().hex[:6].upper()
+    for i, violation in enumerate(violations, 1):
+        if not violation.id or violation.id in ("unique-id", ""):
+            violation.id = f"V{run_prefix}-{i:03d}"
+
+
+# ---------------------------------------------------------------------------
+# Agent node
+# ---------------------------------------------------------------------------
+
+def auditor_node(state: AgentState, llm: BaseChatModel) -> Dict[str, Any]:
+    """
+    Audit parsed resources against retrieved policies.
+
+    Uses policies from the policy_analyst node when available; falls back to
+    a hardcoded deletion-protection check otherwise.
+
+    Args:
+        state: Current agent state.
+        llm:   Configured language model instance.
+
+    Returns:
+        Dict with updated state fields.
+    """
+    try:
+        parsed_resources = state.get("parsed_resources", [])
+        retrieved_policies = state.get("retrieved_policies", [])
+
+        if not parsed_resources:
+            return {
+                "violations": [],
+                "current_node": "auditor",
+                "status": AuditStatus.PASSED,
+                "messages": ["[AUDITOR] No resources found — audit passed"],
+            }
+
+        resources_json = _format_resources_for_prompt(parsed_resources)
+
+        if retrieved_policies:
+            prompt_text = build_dynamic_prompt(retrieved_policies)
+            message_prefix = (
+                f"[AUDITOR] Auditing against {len(retrieved_policies)} retrieved policies"
+            )
+        else:
+            prompt_text = FALLBACK_AUDITOR_PROMPT
+            message_prefix = (
+                "[AUDITOR] Using fallback policy (RAG disabled or no policies retrieved)"
+            )
+
+        prompt = ChatPromptTemplate.from_template(prompt_text)
+        result = invoke_structured(llm, prompt, {"resources_json": resources_json}, ViolationList)
+
+        violations = result.violations if result else []
+        _assign_violation_ids(violations)
+
+        if violations:
+            status = AuditStatus.FAILED
+            outcome_msg = f"[AUDITOR] Found {len(violations)} violation(s)"
+        else:
+            status = AuditStatus.PASSED
+            outcome_msg = "[AUDITOR] All resources are compliant"
+
+        return {
+            "violations": [
+                v.model_dump() if hasattr(v, "model_dump") else v for v in violations
+            ],
+            "current_node": "auditor",
+            "status": status,
+            "messages": [message_prefix, outcome_msg],
+        }
+
+    except Exception:
+        # Log full traceback server-side; return a safe generic message.
+        logger.exception("[AUDITOR] Unexpected error during audit")
+        return {
+            "violations": [],
+            "current_node": "auditor",
+            "status": AuditStatus.ERROR,
+            "error_message": "Auditor failed. Check server logs for details.",
+            "messages": ["[AUDITOR] ERROR: Audit failed — see server logs."],
+        }

@@ -19,9 +19,9 @@ from typing import Dict, List
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import requests
-from rag_service_config import (
-    INGESTION_URL, CHUNKING_URL, EMBEDDING_URL, ADD_VECTORS_URL, APPID
-)
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(
@@ -140,8 +140,13 @@ def index_policies(
     logger.info("=" * 70)
     logger.info("ADAG Policy Indexing Script")
     logger.info("=" * 70)
-    
-    # REST API base URL and appid
+
+    # Build service URLs from environment variables
+    appid           = os.getenv("ADAG_APPID",       "archapp")
+    INGESTION_URL   = os.getenv("RAG_INGEST_URL",   "http://localhost:8001") + "/ingest/{appid}"
+    CHUNKING_URL    = os.getenv("RAG_CHUNK_URL",    "http://localhost:8002") + "/chunk/{appid}"
+    EMBEDDING_URL   = os.getenv("RAG_EMBED_URL",    "http://localhost:8003") + "/embed/{appid}"
+    ADD_VECTORS_URL = os.getenv("RAG_VECTOR_URL",   "http://localhost:8004") + "/add_vectors/{appid}"
     headers = {"Content-Type": "application/json"}
     
     # Reindex if requested (not supported directly, so log only)
@@ -182,7 +187,7 @@ def index_policies(
             }
         }
         try:
-            ingest_resp = requests.post(INGESTION_URL.format(appid=APPID), json=ingest_payload, headers=headers)
+            ingest_resp = requests.post(INGESTION_URL.format(appid=appid), json=ingest_payload, headers=headers)
             ingest_resp.raise_for_status()
             ingest_result = ingest_resp.json()
             logger.info(f"   ✓ Ingested: {policy_data['title']} ({policy_data['severity']})")
@@ -197,7 +202,7 @@ def index_policies(
             "chunker_config": {"chunk_size": 200, "chunk_overlap": 50}
         }
         try:
-            chunk_resp = requests.post(CHUNKING_URL.format(appid=APPID), json=chunk_payload, headers=headers)
+            chunk_resp = requests.post(CHUNKING_URL.format(appid=appid), json=chunk_payload, headers=headers)
             chunk_resp.raise_for_status()
             chunks = chunk_resp.json().get("chunks", [])
             logger.info(f"   ✓ Chunked: {len(chunks)} chunks")
@@ -218,7 +223,7 @@ def index_policies(
         }
         try:
             logger.info(f"[EMBED] Request payload: {embed_payload}")
-            embed_resp = requests.post(EMBEDDING_URL.format(appid=APPID), json=embed_payload, headers=headers)
+            embed_resp = requests.post(EMBEDDING_URL.format(appid=appid), json=embed_payload, headers=headers)
             logger.info(f"[EMBED] Status code: {embed_resp.status_code}")
             logger.info(f"[EMBED] Response: {getattr(embed_resp, 'text', embed_resp)}")
             embed_resp.raise_for_status()
@@ -249,7 +254,7 @@ def index_policies(
             "adapter_config": {}
         }
         try:
-            add_vectors_resp = requests.post(ADD_VECTORS_URL.format(appid=APPID), json=add_vectors_payload, headers=headers)
+            add_vectors_resp = requests.post(ADD_VECTORS_URL.format(appid=appid), json=add_vectors_payload, headers=headers)
             add_vectors_resp.raise_for_status()
             logger.info(f"   ✓ Added vectors to DB for {policy_data['title']}")
         except Exception as e:

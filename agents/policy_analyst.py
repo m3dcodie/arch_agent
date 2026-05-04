@@ -1,61 +1,115 @@
 """
-Policy Analyst agent - Retrieves relevant policies via RAG.
+Policy Analyst agent — retrieves relevant policies for auditing.
+
+Operates in two modes controlled by the USE_RAG environment variable:
+  - Offline/disk mode (USE_RAG=false, default): loads all policies from the
+    local policies/ directory (or POLICIES_DIR). No external services required.
+  - RAG mode (USE_RAG=true): queries the external RAG microservices
+    (https://github.com/m3dcodie/rag-pipeline) for semantically relevant
+    policy chunks. Falls back to disk if the API returns no results.
 """
+import logging
 import os
 from typing import Dict, Any, List
+from urllib.parse import quote
+
+import requests
+
 from core.state import AgentState
 from models.policy import Policy
 from models.violations import AuditStatus
 from core.policy_loader import load_policies_from_dir
 
+logger = logging.getLogger(__name__)
+
+# Hard timeout (seconds) for the RAG context-augmentation API call.
+_RAG_REQUEST_TIMEOUT = 10
+
+
+def _fetch_rag_chunks(endpoint: str, query: str, resource_types: List[str]) -> List[dict]:
+    """
+    Call the context-augmentation REST endpoint and return the chunk list.
+
+    Raises:
+        requests.RequestException: on any network or HTTP error.
+    """
+    payload = {
+        "question": query,
+        "metadata": {"resource_types": resource_types},
+    }
+    response = requests.post(
+        endpoint,
+        json=payload,
+        headers={"Content-Type": "application/json"},
+        timeout=_RAG_REQUEST_TIMEOUT,
+    )
+    response.raise_for_status()
+    return response.json().get("relevant_chunks", [])
+
+
+def _policy_from_chunk(chunk: dict) -> Policy:
+    """
+    Construct a Policy object from a single RAG chunk dict.
+
+    The policy scope is read from the chunk metadata (set by the RAG indexer
+    when the policy was ingested).  If the metadata carries no scope, the
+    scope defaults to an empty list — the auditor will apply the policy
+    universally in that case.
+    """
+    metadata = chunk.get("metadata", {})
+    content = chunk.get("document", "")
+    return Policy(
+        id=metadata.get("id", "unknown"),
+        title=metadata.get("title", "Unknown Policy"),
+        severity=metadata.get("severity", "MEDIUM"),
+        description=_extract_description(content),
+        scope=metadata.get("scope", []),
+        requirements=content,
+        examples_compliant=_extract_section(content, "Compliant Example"),
+        examples_non_compliant=_extract_section(content, "Non-Compliant Example"),
+        remediation=_extract_section(content, "Remediation"),
+        file_path=metadata.get("file_path"),
+        distance=chunk.get("distance"),
+    )
+
 
 def policy_analyst_node(state: AgentState) -> Dict[str, Any]:
     """
     Retrieve relevant policies based on parsed resources.
-    
-    This agent uses RAG (Retrieval-Augmented Generation) to find policies
-    that are relevant to the resources parsed by the intake agent.
-    
+
+    In offline mode (USE_RAG=false or unset): loads all policies from disk.
+    In RAG mode (USE_RAG=true): queries the context augmentation microservice
+    for semantically relevant policy chunks; falls back to disk if the service
+    returns no results.
+
     Args:
-        state: Current agent state containing parsed_resources
-        
+        state: Current agent state. Expects ``resource_types`` and
+               ``parsed_resources`` to have been populated by the intake node.
+
     Returns:
         Dict with updated state fields:
-            - retrieved_policies: List of Policy objects
-            - resource_types: List of resource type strings
-            - current_node: Current node name
+            - retrieved_policies: List of serialised Policy dicts
+            - resource_types: Unchanged pass-through from intake
+            - current_node: "policy_analyst"
             - messages: Status messages
     """
     try:
-        parsed_resources = state.get("parsed_resources", [])
-        
-        # If no resources to analyze, return empty policies
-        if not parsed_resources:
+        # Use resource_types already extracted by the intake node — avoids
+        # duplicating extraction logic and ensures a single source of truth.
+        resource_types: List[str] = state.get("resource_types") or []
+
+        # If no resource types, nothing to retrieve policies for.
+        if not resource_types:
             return {
                 "retrieved_policies": [],
                 "resource_types": [],
                 "current_node": "policy_analyst",
-                "messages": ["[POLICY_ANALYST] No resources to analyze"]
+                "messages": ["[POLICY_ANALYST] No resource types found — skipping policy retrieval"],
             }
-        
-        # Extract unique resource types — resources may be dicts (serialized for checkpoint)
-        resource_types = list(set(
-            r.get("resource_type", "") if isinstance(r, dict) else r.resource_type
-            for r in parsed_resources
-        ))
-        
-        # Build semantic query for RAG retrieval
-        # Include resource types and general security/compliance terms
-        query_parts = [
-            f"Policies for {', '.join(resource_types)} resources",
-            "security compliance requirements",
-            "database infrastructure policies"
-        ]
-        query = " ".join(query_parts)
-        
-        # Check if RAG is enabled
-        use_rag = os.getenv("USE_RAG", "true").lower() == "true"
-        
+
+        # Check if RAG is enabled. Default to OFF — enable explicitly with USE_RAG=true.
+        use_rag = os.getenv("USE_RAG", "false").lower() == "true"
+
         if not use_rag:
             # Offline mode: load policies directly from disk — no microservices needed.
             # Respects POLICIES_DIR env var; falls back to built-in policies/ bundle.
@@ -67,131 +121,110 @@ def policy_analyst_node(state: AgentState) -> Dict[str, Any]:
                 "current_node": "policy_analyst",
                 "messages": [
                     f"[POLICY_ANALYST] RAG disabled — loaded {len(disk_policies)} policies from disk",
-                    f"[POLICY_ANALYST] Resource types: {', '.join(resource_types)}"
-                ]
+                    f"[POLICY_ANALYST] Resource types: {', '.join(resource_types)}",
+                ],
             }
-        
-        # Call REST API for context augmentation
-        import requests
-        from rag_service_config import CONTEXT_AUG_URL, APPID
-        endpoint = CONTEXT_AUG_URL.format(appid=APPID)
-        payload = {
-            "question": query,
-            "metadata": {"resource_types": resource_types}
-        }
-        headers = {"Content-Type": "application/json"}
+
+        # RAG mode: build a semantic query and call the context augmentation service.
+        query = " ".join([
+            f"Policies for {', '.join(resource_types)} resources",
+            "security compliance requirements",
+            "database infrastructure policies",
+        ])
+
+        # URL-encode the app ID to prevent path traversal via a crafted env var.
+        appid = quote(os.getenv("ADAG_APPID", "archapp"), safe="")
+        base_url = os.getenv("RAG_CONTEXT_URL", "http://localhost:8000")
+        endpoint = f"{base_url}/context-augment/{appid}"
+
         try:
-            response = requests.post(endpoint, json=payload, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-        except Exception as e:
+            chunks = _fetch_rag_chunks(endpoint, query, resource_types)
+        except Exception:
+            # Log the full exception server-side; return a safe generic message.
+            logger.exception("[POLICY_ANALYST] RAG API call failed")
             return {
                 "retrieved_policies": [],
                 "resource_types": resource_types,
                 "current_node": "policy_analyst",
                 "status": AuditStatus.ERROR,
-                "error_message": f"RAG API call failed: {str(e)}",
-                "messages": [f"[POLICY_ANALYST] ERROR: RAG API call failed: {str(e)}"]
+                "error_message": "RAG API call failed. Check server logs for details.",
+                "messages": ["[POLICY_ANALYST] ERROR: RAG API call failed — see server logs."],
             }
 
-        # Parse relevant_chunks from API response
-        relevant_chunks = data.get("relevant_chunks", [])
-        retrieved_policies = []
-        for chunk in relevant_chunks:
-            metadata = chunk.get("metadata", {})
-            content = chunk.get("document", "")
-            policy = Policy(
-                id=metadata.get("id", "unknown"),
-                title=metadata.get("title", "Unknown Policy"),
-                severity=metadata.get("severity", "MEDIUM"),
-                description=_extract_description(content),
-                scope=resource_types,
-                requirements=content,
-                examples_compliant=_extract_section(content, "Compliant Example"),
-                examples_non_compliant=_extract_section(content, "Non-Compliant Example"),
-                remediation=_extract_section(content, "Remediation"),
-                file_path=metadata.get("file_path"),
-                distance=chunk.get("distance")
-            )
-            retrieved_policies.append(policy)
+        # If the service returns no chunks, fall back to disk so the auditor
+        # always has policies to work against.
+        if not chunks:
+            policies_dir = os.getenv("POLICIES_DIR")
+            disk_policies = load_policies_from_dir(policies_dir)
+            return {
+                "retrieved_policies": [p.model_dump() for p in disk_policies],
+                "resource_types": resource_types,
+                "current_node": "policy_analyst",
+                "messages": [
+                    "[POLICY_ANALYST] RAG returned no chunks — falling back to disk policies",
+                    f"[POLICY_ANALYST] Loaded {len(disk_policies)} policies from disk",
+                    f"[POLICY_ANALYST] Resource types: {', '.join(resource_types)}",
+                ],
+            }
 
+        retrieved_policies = [_policy_from_chunk(chunk) for chunk in chunks]
         return {
             "retrieved_policies": [p.model_dump() for p in retrieved_policies],
             "resource_types": resource_types,
             "current_node": "policy_analyst",
             "messages": [
-                f"[POLICY_ANALYST] Retrieved {len(retrieved_policies)} relevant policies via REST API",
-                f"[POLICY_ANALYST] Resource types: {', '.join(resource_types)}"
-            ]
+                f"[POLICY_ANALYST] Retrieved {len(retrieved_policies)} relevant policies via RAG",
+                f"[POLICY_ANALYST] Resource types: {', '.join(resource_types)}",
+            ],
         }
-        
-    except Exception as e:
+
+    except Exception:
+        logger.exception("[POLICY_ANALYST] Unexpected error during policy retrieval")
         return {
             "retrieved_policies": [],
             "resource_types": [],
             "current_node": "policy_analyst",
             "status": AuditStatus.ERROR,
-            "error_message": f"Policy analyst failed: {str(e)}",
-            "messages": [f"[POLICY_ANALYST] ERROR: {str(e)}"]
+            "error_message": "Policy analyst failed. Check server logs for details.",
+            "messages": ["[POLICY_ANALYST] ERROR: Policy retrieval failed — see server logs."],
         }
 
 
 def _extract_description(content: str) -> str:
     """
-    Extract a brief description from policy content.
-    
-    Args:
-        content: Full policy markdown content
-        
-    Returns:
-        First paragraph or first 200 characters
+    Extract a brief description from policy markdown content.
+
+    Returns the first non-header, non-bold line, capped at 200 characters.
+    Falls back to the first 200 characters of content if no such line exists.
     """
     if not content:
         return ""
-    
-    # Try to find the first paragraph after the title
-    lines = content.split('\n')
-    for i, line in enumerate(lines):
-        line = line.strip()
-        # Skip headers and empty lines
-        if line and not line.startswith('#') and not line.startswith('**'):
-            # Return first substantial paragraph
-            return line[:200] + "..." if len(line) > 200 else line
-    
-    # Fallback: return first 200 characters
-    return content[:200] + "..." if len(content) > 200 else content
+    for line in content.split("\n"):
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#") and not stripped.startswith("**"):
+            return stripped[:200] + ("..." if len(stripped) > 200 else "")
+    return content[:200] + ("..." if len(content) > 200 else "")
 
 
 def _extract_section(content: str, section_name: str) -> str:
     """
-    Extract a specific section from policy markdown.
-    
-    Args:
-        content: Full policy markdown content
-        section_name: Name of section to extract (e.g., "Remediation")
-        
-    Returns:
-        Content of the section, or empty string if not found
+    Extract a named section from policy markdown content.
+
+    Sections are delimited by headings (lines starting with ``#``).
+    Returns the section body as a stripped string, or ``""`` if not found.
     """
     if not content:
         return ""
-    
-    lines = content.split('\n')
     in_section = False
-    section_content = []
-    
-    for line in lines:
-        # Check if we're entering the target section
-        if section_name.lower() in line.lower() and line.strip().startswith('#'):
-            in_section = True
-            continue
-        
-        # Check if we're entering a new section (exit current)
-        if in_section and line.strip().startswith('#'):
-            break
-        
-        # Collect lines in the section
+    section_lines: List[str] = []
+    for line in content.split("\n"):
+        if line.strip().startswith("#"):
+            if section_name.lower() in line.lower():
+                in_section = True
+                continue
+            if in_section:
+                break  # next heading closes the current section
         if in_section:
-            section_content.append(line)
-    
-    return '\n'.join(section_content).strip()
+            section_lines.append(line)
+    return "\n".join(section_lines).strip()
+

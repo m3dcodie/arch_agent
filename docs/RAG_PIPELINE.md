@@ -34,7 +34,7 @@ This document covers the Advanced RAG mode: when to use it, the five-microservic
 
 ## 2. Architecture Overview
 
-The RAG pipeline is a set of five independent microservices. ADAG calls them via HTTP. The services live in a separate repository (`github.com/your-org/rag`).
+The RAG pipeline is a set of five independent microservices. ADAG calls them via HTTP. The services live in a separate repository ([github.com/m3dcodie/rag-pipeline](https://github.com/m3dcodie/rag-pipeline)).
 
 ```
                     ┌─────────────────────────────────────┐
@@ -137,7 +137,7 @@ The RAG microservices are in a separate repository. Clone and start them before 
 ### Clone the RAG services repo
 
 ```bash
-git clone https://github.com/your-org/rag.git
+git clone https://github.com/m3dcodie/rag-pipeline.git
 cd rag
 ```
 

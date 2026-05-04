@@ -1,6 +1,6 @@
 """
 Hugging Face LLM provider via the HF router (OpenAI-compatible endpoint).
-Uses https://router.huggingface.co/v1 — no AWS credentials required.
+Uses the HF_ROUTER_BASE_URL env var (default: https://router.huggingface.co/v1).
 """
 
 import os
@@ -9,8 +9,6 @@ from langchain_openai import ChatOpenAI
 from langchain_core.language_models import BaseChatModel
 
 from core.llm_provider import LLMProvider, LLMFactory
-
-HF_ROUTER_BASE_URL = "https://router.huggingface.co/v1"
 
 
 class HuggingFaceProvider(LLMProvider):
@@ -26,6 +24,7 @@ class HuggingFaceProvider(LLMProvider):
     ):
         self.model = model or os.getenv("HF_MODEL", self.DEFAULT_MODEL)
         self.api_key = api_key or os.getenv("HF_TOKEN", "")
+        self.base_url = os.getenv("HF_ROUTER_BASE_URL", "https://router.huggingface.co/v1")
         self.temperature = float(os.getenv("HF_TEMPERATURE", "0.1"))
         self.max_tokens = int(os.getenv("HF_MAX_TOKENS", "2048"))
         self.extra_kwargs = kwargs
@@ -35,7 +34,7 @@ class HuggingFaceProvider(LLMProvider):
         config = {
             "model": self.model,
             "openai_api_key": self.api_key,
-            "openai_api_base": HF_ROUTER_BASE_URL,
+            "openai_api_base": self.base_url,
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
             **self.extra_kwargs,

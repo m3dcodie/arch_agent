@@ -21,7 +21,6 @@ Built to explore and demonstrate: **LangGraph** · **Multi-Agent Systems** · **
 - Documentation
 - License
 
-
 ## What it does
 
 ADAG reads your `.tf` files, checks them against 10 built-in compliance policies (or your own), and reports violations with remediation hints. It runs as a CLI tool, a Python library, or an MCP server that any AI assistant can call.
@@ -182,7 +181,7 @@ your-repo/
 │           └── main.tf  ← scanned (recursive)
 ```
 
-```bash
+````bash
 # Single file — useful when you only want to check one resource
 adag scan ./infra/main.tf
 
@@ -207,7 +206,7 @@ You can also set the policies directory via the POLICIES_DIR environment variabl
 ```ini
 # in your .env
 POLICIES_DIR=./my-org-policies
-```
+````
 
 Copy the example template to create a working .env and edit it for your environment:
 
@@ -219,7 +218,9 @@ cp .env.example .env
 See docs/CONFIGURATION.md and the project's .env.example for a full list of environment variables and provider configuration.
 
 # Fully offline — skip RAG even if USE_RAG=true in .env
+
 adag scan ./infra/ --no-rag
+
 ```
 
 ---
@@ -246,20 +247,22 @@ By default ADAG loads all policies from the `policies/` directory into the LLM's
 ### How it works
 
 ```
+
 Your docs (Confluence, ADRs, Markdown)
-        │
-        ▼
-  Ingest → Chunk → Embed → ChromaDB     ← one-time indexing
-                               │
-                    Scan time: │
-  Terraform resource description
-        │
-        ▼
-  Semantic query → top-k relevant policy chunks
-        │
-        ▼
-  Auditor LLM (sees only what's relevant, not everything)
-```
+│
+▼
+Ingest → Chunk → Embed → ChromaDB ← one-time indexing
+│
+Scan time: │
+Terraform resource description
+│
+▼
+Semantic query → top-k relevant policy chunks
+│
+▼
+Auditor LLM (sees only what's relevant, not everything)
+
+````
 
 ### When you need RAG
 
@@ -280,8 +283,8 @@ python scripts/index_policies.py --policies-dir ./policies/
 
 # 3. Set env vars and scan
 USE_RAG=true
-CONTEXT_AUGMENTATION_URL=http://localhost:8000
-```
+RAG_CONTEXT_URL=http://localhost:8000
+````
 
 ```bash
 USE_RAG=true adag scan ./infra/
