@@ -159,18 +159,19 @@ Checkpoints exist for debugging (you can inspect the SQLite DB to see intermedia
 
 ### Agent 1: Intake (`agents/intake.py`)
 
-**Purpose:** Parse raw Terraform HCL into structured `TerraformResource` objects.
+**Purpose:** Validate input and parse raw Terraform HCL into structured `TerraformResource` objects.
 
-**Key property:** The LLM is **never called** in this agent. All parsing is deterministic regex.
+**Key property:** The LLM is **never called** in this agent. All parsing is delegated to `core/hcl_parser.py` (deterministic regex).
 
 **What it does:**
 
+- Validates input: rejects empty content and enforces a 2 MB size limit
 - Extracts `resource "TYPE" "NAME" { ... }` blocks using a brace-counting regex walker
 - Extracts `provider "NAME" { ... }` blocks
 - Parses `key = value` pairs from attribute blocks (handles strings, booleans, numbers, lists)
-- Filters to auditable resource types: `aws_db_instance`, `aws_rds_cluster`, `aws_rds_cluster_instance`, `aws_kms_key`, `aws_s3_bucket`, `aws_s3_bucket_public_access_block`, `aws_s3_bucket_server_side_encryption_configuration`, `provider`
+- Returns **all** resource types found — no hardcoded filter list; downstream agents decide relevance
 
-**Output into state:** `parsed_resources: List[TerraformResource]`
+**Output into state:** `parsed_resources: List[TerraformResource]`, `resource_types: List[str]` (deduplicated list of all resource types present in the file)
 
 **Why no LLM?** LLMs hallucinate attribute values. If you ask an LLM "does this resource have `deletion_protection = true`?", it will sometimes confidently say yes even when the attribute is absent. Regex extraction is 100% reliable for structured HCL.
 
@@ -184,8 +185,10 @@ Checkpoints exist for debugging (you can inspect the SQLite DB to see intermedia
 
 **RAG mode** (`USE_RAG=true`):
 
+- Reads `resource_types` from state (set by Intake)
 - Constructs a semantic query from found resource types (e.g., `"Policies for aws_db_instance, aws_rds_cluster resources security compliance requirements"`)
-- POSTs to `http://localhost:8000/context-augment/{appid}`
+- POSTs to `http://localhost:8000/context-augment/{appid}` — the `appid` is URL-encoded to prevent path traversal
+- Uses a 10-second HTTP timeout on all requests
 - Parses `relevant_chunks` from the response
 - Converts chunks to `Policy` objects
 
@@ -194,7 +197,7 @@ Checkpoints exist for debugging (you can inspect the SQLite DB to see intermedia
 - Calls `core/policy_loader.py` to load all `.md` files from the `policies/` directory
 - Regex extracts policy ID, title, severity, scope, and full text
 
-**Output into state:** `retrieved_policies: List[Policy]`, `resource_types: List[str]`
+**Output into state:** `retrieved_policies: List[Policy]`
 
 ---
 
@@ -206,10 +209,11 @@ Checkpoints exist for debugging (you can inspect the SQLite DB to see intermedia
 
 **What it does:**
 
-- Builds a prompt containing all resource attributes and all policy texts
+- Builds a prompt containing all resource attributes and all policy texts — prompt templates live in `agents/prompts.py`
 - Uses `with_structured_output(ViolationList)` for OpenAI-compatible providers (`method="function_calling"`)
 - Falls back to plain text invoke + regex JSON extraction for Ollama and HuggingFace providers
 - Implements exponential backoff retry on HTTP 429 rate-limit errors (waits 15s, 30s, 60s)
+- LLM invocation, fallback, and retry logic is centralised in `core/llm_utils.invoke_structured`
 - Handles S3 companion resources: does not flag `aws_s3_bucket` for encryption if `aws_s3_bucket_server_side_encryption_configuration` is present
 
 **Output into state:** `violations: List[Violation]`, `status: AuditStatus`
@@ -355,15 +359,20 @@ See [RAG_PIPELINE.md](RAG_PIPELINE.md) for full setup and operational details.
 
 **Pattern:**
 
+LLM invocation, structured-output fallback, and rate-limit retry are centralised in `core/llm_utils.invoke_structured`. The auditor calls this helper rather than managing the retry loop itself.
+
 ```python
-def _invoke_structured(self, llm, prompt):
+# core/llm_utils.py — shared by all agents that need LLM calls
+def invoke_structured(llm, prompt, inputs, schema):
     try:
-        structured_llm = llm.with_structured_output(ViolationList, method="function_calling")
-        return structured_llm.invoke(prompt)
+        chain = prompt | llm.with_structured_output(schema, method="function_calling")
+        return chain.invoke(inputs)
+    except RateLimitError:
+        # exponential backoff: 15s, 30s, 60s
+        ...
     except Exception:
-        # fallback: extract JSON from plain text response
-        raw = llm.invoke(prompt).content
-        return self._parse_json_fallback(raw)
+        # fallback: plain invoke + regex JSON extraction
+        return _plain_invoke(llm, prompt, inputs, schema)
 ```
 
 ---
@@ -399,27 +408,29 @@ ADAGRunner.scan()
   │ calls ADAGGraph.run(state)
   ▼
 LangGraph: START → intake_node
-  │ regex parses HCL blocks
+  │ validates input (rejects empty / > 2 MB)
+  │ regex parses HCL blocks via core/hcl_parser.py
   │ extracts TerraformResource objects
-  │ sets parsed_resources in state
+  │ sets parsed_resources, resource_types in state
   │ no LLM call
   ▼
 conditional edge: _should_continue_after_intake()
   │ resources found → continue
   ▼
 LangGraph: policy_analyst_node
+  │ reads resource_types from state (set by intake)
   │ USE_RAG=false → policy_loader.load_all_policies()
   │ reads all .md files from policies/
-  │ sets retrieved_policies, resource_types in state
+  │ sets retrieved_policies in state
   │ no LLM call
   ▼
 conditional edge: _should_continue_after_policy_analyst()
   │ policies found → continue
   ▼
 LangGraph: auditor_node
-  │ builds prompt with resources + policies
+  │ builds prompt with resources + policies (templates from agents/prompts.py)
   │ calls GitHubCopilotProvider.get_model("auditor")
-  │ invokes LLM with structured output
+  │ calls core/llm_utils.invoke_structured (handles fallback + retry)
   │ LLM returns ViolationList JSON
   │ sets violations, status=FAILED in state
   ▼

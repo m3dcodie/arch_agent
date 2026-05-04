@@ -20,14 +20,23 @@ logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
 
-# Signals that indicate a 429 / rate-limit response from any provider.
-_RATE_LIMIT_SIGNALS = ("429", "rate limit", "too many requests", "ratelimit")
+# Signals that indicate a transient rate-limit or throttle response from any provider.
+# GitHub Copilot API sometimes returns HTTP 403 "forbidden" instead of 429 when
+# temporarily throttled, so we treat those as retriable too.
+_RATE_LIMIT_SIGNALS = (
+    "429",
+    "rate limit",
+    "too many requests",
+    "ratelimit",
+    "access to this endpoint is forbidden",  # GitHub Copilot transient 403
+)
 
 # Maximum number of attempts before giving up.
 _MAX_RETRIES = 3
 
-# Base wait time in seconds; doubles on each subsequent attempt (15 → 30 → 60).
-_RETRY_BASE_WAIT = 15
+# Base wait time in seconds; doubles on each subsequent attempt (5 → 10 → 20).
+# Kept short because GitHub Copilot transient 403s typically resolve in seconds.
+_RETRY_BASE_WAIT = 5
 
 # Try to import ChatOpenAI once at module load so the check is free in the
 # hot retry loop.  If langchain-openai is not installed, fall back gracefully.

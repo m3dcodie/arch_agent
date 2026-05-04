@@ -42,7 +42,7 @@ Status: FAILED  (exit code 1)
 ## Key Features
 
 - **Multi-agent graph** — three specialised agents (Intake, Policy Analyst, Auditor) orchestrated by LangGraph
-- **Deterministic parsing** — the HCL parser never calls an LLM; regex extraction eliminates false positives from hallucinated attribute values. Automatically discovers auditable resource types from policies — add custom resources by creating new policies
+- **Deterministic parsing** — the HCL parser (`core/hcl_parser.py`) never calls an LLM; regex extraction eliminates false positives from hallucinated attribute values. All resource types present in the Terraform file are extracted and passed to the policy analyst and auditor — no hardcoded filter list
 - **10 built-in policies** — deletion protection, encryption at rest, public access block, multi-AZ, backup retention, KMS key rotation, allowed regions, required tagging, naming conventions
 - **Four LLM providers** — AWS Bedrock, GitHub Copilot, HuggingFace, Ollama (fully local); all support **per-agent model selection** (`INTAKE_MODEL`, `AUDITOR_MODEL`) so you can use a fast small model for parsing and a powerful reasoning model for policy judgement
 - **Three output formats** — human-readable text, JSON, SARIF 2.1.0 (GitHub Advanced Security)
