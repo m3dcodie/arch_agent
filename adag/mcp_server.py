@@ -243,12 +243,15 @@ def ingest_document(path: str) -> dict[str, Any]:
     appid = os.getenv("ADAG_APPID", "archapp")
     url   = os.getenv("RAG_INGEST_URL", "http://localhost:8001") + f"/ingest/{appid}"
     try:
-        with doc_path.open("rb") as fh:
-            response = requests.post(
-                url,
-                files={"file": (doc_path.name, fh)},
-                timeout=60,
-            )
+        payload = {
+            "source_type": "local",
+            "config": {"paths": [str(doc_path.resolve())]},
+        }
+        response = requests.post(
+            url,
+            json=payload,
+            timeout=60,
+        )
         response.raise_for_status()
         return {
             "ingested": path,
