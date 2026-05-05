@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/) and this
 project follows Semantic Versioning (https://semver.org/).
 
+## [1.1.1] - 2026-05-05
+
+### Changed
+
+- **`llms.txt`** aligned with the actual codebase — corrected per-agent model overrides (`INTAKE_MODEL`/`AUDITOR_MODEL`) to document that they apply across **all providers** (Bedrock, GitHub Copilot, HuggingFace, Ollama), not HuggingFace only; added missing env vars (`BEDROCK_MODEL`, `HF_TEMPERATURE`, `HF_MAX_TOKENS`, `HF_ROUTER_BASE_URL`, `OLLAMA_TIMEOUT`, `OLLAMA_THINK`); added correct GitHub Copilot default model (`claude-sonnet-4.5`) and available model list; noted `ANTHROPIC_MODEL` as a deprecated alias for `BEDROCK_MODEL`
+
+---
+
 ## [1.1.0] - 2026-05-05
 
 ### Added
