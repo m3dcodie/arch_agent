@@ -362,6 +362,19 @@ pytest --cov=adag --cov=agents --cov=core --cov=models --cov-report=term-missing
 
 ---
 
+## Inspiration & Related Projects
+
+ADAG was built on the shoulders of several frameworks and repositories by the same author. If you find this project useful, these are worth exploring:
+
+| Repository | Role in this project |
+| ---------- | -------------------- |
+| [m3dcodie/prompt-contract](https://github.com/m3dcodie/prompt-contract) | The Prompt Contract framework that governs how the Auditor agent's prompts are structured — 5-layer cognitive architecture (Role → Language → Scope → Reasoning → Objective) replacing ad-hoc prompt engineering |
+| [m3dcodie/rag-pipeline](https://github.com/m3dcodie/rag-pipeline) | The RAG microservices that back ADAG's advanced RAG mode — context augmentation service, ChromaDB vector store, and embedding pipeline |
+| [m3dcodie/LLM-Capability-Framework-LCF](https://github.com/m3dcodie/LLM-Capability-Framework-LCF) | The LCF model-tier taxonomy used to assign the right model to each agent (Intake = Scout / fast, Auditor = Strategist / reasoning-heavy) |
+| [m3dcodie/adag_test](https://github.com/m3dcodie/adag_test) | The integration test infrastructure for ADAG — Terraform fixtures (pass/fail/mixed/edge-case/per-policy) and the `run_tests.sh` harness used to validate the full CLI, MCP, and RAG stack |
+
+---
+
 ## License
 
 MIT — free to use, modify, and distribute.
