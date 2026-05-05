@@ -45,8 +45,8 @@ arch_agent/
 │   ├── database_provider.py   ← DatabaseProvider ABC + DatabaseFactory
 │   ├── sqlite_provider.py     ← SQLite checkpointer
 │   ├── policy_loader.py       ← offline .md policy loader
-│   ├── rag_provider.py        ← stub (RAG REST client placeholder)
-│   └── chroma_provider.py     ← stub (local ChromaDB placeholder)
+│   ├── rag_provider.py        ← stub (RAG REST client — not yet implemented)
+│   └── chroma_provider.py     ← stub (unused — ChromaDB lives in the external microservice stack)
 │
 ├── models/                    ← Pydantic data models
 │   ├── policy.py              ← Policy model

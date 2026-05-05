@@ -21,7 +21,6 @@ Built to explore and demonstrate: **LangGraph** · **Multi-Agent Systems** · **
 - Documentation
 - License
 
-
 ## What it does
 
 ADAG reads your `.tf` files, checks them against 10 built-in compliance policies (or your own), and reports violations with remediation hints. It runs as a CLI tool, a Python library, or an MCP server that any AI assistant can call.
@@ -43,7 +42,7 @@ Status: FAILED  (exit code 1)
 ## Key Features
 
 - **Multi-agent graph** — three specialised agents (Intake, Policy Analyst, Auditor) orchestrated by LangGraph
-- **Deterministic parsing** — the HCL parser never calls an LLM; regex extraction eliminates false positives from hallucinated attribute values. Automatically discovers auditable resource types from policies — add custom resources by creating new policies
+- **Deterministic parsing** — the HCL parser (`core/hcl_parser.py`) never calls an LLM; regex extraction eliminates false positives from hallucinated attribute values. All resource types present in the Terraform file are extracted and passed to the policy analyst and auditor — no hardcoded filter list
 - **10 built-in policies** — deletion protection, encryption at rest, public access block, multi-AZ, backup retention, KMS key rotation, allowed regions, required tagging, naming conventions
 - **Four LLM providers** — AWS Bedrock, GitHub Copilot, HuggingFace, Ollama (fully local); all support **per-agent model selection** (`INTAKE_MODEL`, `AUDITOR_MODEL`) so you can use a fast small model for parsing and a powerful reasoning model for policy judgement
 - **Three output formats** — human-readable text, JSON, SARIF 2.1.0 (GitHub Advanced Security)
@@ -182,7 +181,7 @@ your-repo/
 │           └── main.tf  ← scanned (recursive)
 ```
 
-```bash
+````bash
 # Single file — useful when you only want to check one resource
 adag scan ./infra/main.tf
 
@@ -207,7 +206,7 @@ You can also set the policies directory via the POLICIES_DIR environment variabl
 ```ini
 # in your .env
 POLICIES_DIR=./my-org-policies
-```
+````
 
 Copy the example template to create a working .env and edit it for your environment:
 
@@ -219,7 +218,9 @@ cp .env.example .env
 See docs/CONFIGURATION.md and the project's .env.example for a full list of environment variables and provider configuration.
 
 # Fully offline — skip RAG even if USE_RAG=true in .env
+
 adag scan ./infra/ --no-rag
+
 ```
 
 ---
@@ -246,20 +247,22 @@ By default ADAG loads all policies from the `policies/` directory into the LLM's
 ### How it works
 
 ```
+
 Your docs (Confluence, ADRs, Markdown)
-        │
-        ▼
-  Ingest → Chunk → Embed → ChromaDB     ← one-time indexing
-                               │
-                    Scan time: │
-  Terraform resource description
-        │
-        ▼
-  Semantic query → top-k relevant policy chunks
-        │
-        ▼
-  Auditor LLM (sees only what's relevant, not everything)
-```
+│
+▼
+Ingest → Chunk → Embed → ChromaDB ← one-time indexing
+│
+Scan time: │
+Terraform resource description
+│
+▼
+Semantic query → top-k relevant policy chunks
+│
+▼
+Auditor LLM (sees only what's relevant, not everything)
+
+````
 
 ### When you need RAG
 
@@ -280,8 +283,8 @@ python scripts/index_policies.py --policies-dir ./policies/
 
 # 3. Set env vars and scan
 USE_RAG=true
-CONTEXT_AUGMENTATION_URL=http://localhost:8000
-```
+RAG_CONTEXT_URL=http://localhost:8000
+````
 
 ```bash
 USE_RAG=true adag scan ./infra/
@@ -356,6 +359,19 @@ pytest --cov=adag --cov=agents --cov=core --cov=models --cov-report=term-missing
 | [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)               | Adding providers, agents, policies           |
 | [docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md) | API and data model reference                 |
 | [VISION.md](VISION.md)                                     | Why this exists and what it is teaching      |
+
+---
+
+## Inspiration & Related Projects
+
+ADAG was built on the shoulders of several frameworks and repositories by the same author. If you find this project useful, these are worth exploring:
+
+| Repository | Role in this project |
+| ---------- | -------------------- |
+| [m3dcodie/prompt-contract](https://github.com/m3dcodie/prompt-contract) | The Prompt Contract framework that governs how the Auditor agent's prompts are structured — 5-layer cognitive architecture (Role → Language → Scope → Reasoning → Objective) replacing ad-hoc prompt engineering |
+| [m3dcodie/rag-pipeline](https://github.com/m3dcodie/rag-pipeline) | The RAG microservices that back ADAG's advanced RAG mode — context augmentation service, ChromaDB vector store, and embedding pipeline |
+| [m3dcodie/LLM-Capability-Framework-LCF](https://github.com/m3dcodie/LLM-Capability-Framework-LCF) | The LCF model-tier taxonomy used to assign the right model to each agent (Intake = Scout / fast, Auditor = Strategist / reasoning-heavy) |
+| [m3dcodie/adag_test](https://github.com/m3dcodie/adag_test) | The integration test infrastructure for ADAG — Terraform fixtures (pass/fail/mixed/edge-case/per-policy) and the `run_tests.sh` harness used to validate the full CLI, MCP, and RAG stack |
 
 ---
 

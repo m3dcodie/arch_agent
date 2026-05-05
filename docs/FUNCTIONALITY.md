@@ -36,7 +36,7 @@ ADAG reads `.tf` files as raw text. No Terraform CLI, no `terraform init`, no pr
 
 ### Supported Resource Types
 
-The intake agent extracts these resource types (others are skipped):
+The intake agent (`core/hcl_parser.py`) extracts **all** resource and provider blocks present in the `.tf` file — there is no hardcoded filter list. The policy analyst and auditor then work against whatever types are found. Built-in policies cover these AWS resource types:
 
 | Resource Type                                        | Service                  |
 | ---------------------------------------------------- | ------------------------ |
@@ -48,6 +48,8 @@ The intake agent extracts these resource types (others are skipped):
 | `aws_s3_bucket_public_access_block`                  | S3 public access config  |
 | `aws_s3_bucket_server_side_encryption_configuration` | S3 encryption config     |
 | `provider`                                           | Terraform provider block |
+
+Resource types not covered by any built-in policy will be parsed and passed to the auditor, but the LLM will find no applicable policy to check them against. Add a policy Markdown file to extend coverage to additional resource types.
 
 ### Custom Policies Directory
 
