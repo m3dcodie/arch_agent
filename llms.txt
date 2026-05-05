@@ -9,40 +9,50 @@ Summary
 
 Supported providers
 - Hugging Face (server or router)
-  - Configure: set HF_TOKEN and HF_MODEL in .env or environment.
+  - Configure: HF_TOKEN, HF_MODEL, HF_TEMPERATURE (default 0.1), HF_MAX_TOKENS (default 2048).
+  - HF_ROUTER_BASE_URL overrides the endpoint (default: https://router.huggingface.co/v1).
   - Example model id: Qwen/Qwen2.5-7B-Instruct (fast), Qwen/Qwen2.5-72B-Instruct (reasoning)
 
 - Ollama (local)
-  - Configure: OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_NUM_PREDICT
+  - Configure: OLLAMA_BASE_URL, OLLAMA_MODEL, OLLAMA_NUM_PREDICT, OLLAMA_TIMEOUT, OLLAMA_THINK
+  - OLLAMA_NUM_PREDICT=-1 (default) means unlimited tokens. OLLAMA_TIMEOUT caps model hang time (default 300 s).
+  - OLLAMA_THINK=true enables internal <think> chain on reasoning models (e.g. deepseek-r1, qwen3); disabled by default to avoid long hangs.
   - Use for offline/local inference when available.
 
 - GitHub Copilot
   - Configure: GITHUB_COPILOT_TOKEN (OAuth token) and GITHUB_COPILOT_MODEL
-  - Note: requires a Copilot subscription for some models. Use gh to obtain tokens: `gh auth status --show-token`.
+  - Default model: claude-sonnet-4.5. Other available IDs: gpt-4o, gpt-4.1, gpt-4.1-mini, gpt-4o-mini, claude-sonnet-4, claude-haiku-4.5, claude-opus-4.5.
+  - Note: claude-* and gemini-* models require Copilot Pro+ or Enterprise. Use gh to obtain tokens: `gh auth status --show-token`.
 
 - Bedrock (AWS)
-  - Configure via AWS credentials and the repo LLM_PROVIDER=bedrock when using Bedrock-specific models.
+  - Configure: set AWS_PROFILE, AWS_REGION, and BEDROCK_MODEL in .env or environment.
+  - BEDROCK_MODEL accepts a full model ID or a cross-region inference profile ARN (prefix au., us., eu., ap.).
+  - Legacy: ANTHROPIC_MODEL is a deprecated alias for BEDROCK_MODEL.
 
 Agent role mapping (recommended)
 - Intake (L1 — Scout / Processor)
   - Goal: deterministic structured extraction (JSON), low latency, minimal hallucination.
   - Recommended HF: Qwen/Qwen2.5-7B-Instruct
-  - Settings: temperature 0.0-0.1, low max tokens, prefer instruction-following models.
+  - Settings: HF_TEMPERATURE=0.0–0.1, HF_MAX_TOKENS low (e.g. 1024), prefer instruction-following models.
 
 - Auditor (L3 — Strategist / Architect)
   - Goal: deep reasoning, policy analysis, synthesis.
   - Recommended HF: Qwen/Qwen2.5-72B-Instruct or other large reasoning-focused model.
-  - Settings: higher max tokens, temperature 0.0-0.2 depending on exploration needs.
+  - Settings: HF_MAX_TOKENS higher (e.g. 4096), HF_TEMPERATURE=0.0–0.2 depending on exploration needs.
 
 - Policy Analyst / Other L2 roles
   - Goal: balanced reasoning and instruction following.
   - Recommended HF: mid-large models (13B–32B family) depending on cost and latency.
 
 How to override per-agent models
+- INTAKE_MODEL and AUDITOR_MODEL work across ALL providers (Bedrock, GitHub Copilot, HuggingFace, Ollama).
 - You can set per-agent environment variables (see .env.example):
-  - INTAKE_MODEL — overrides HF_MODEL for the intake agent
-  - AUDITOR_MODEL — overrides HF_MODEL for the auditor agent
-  - HF_MODEL — default HF model for agents that don't have per-agent overrides
+  - INTAKE_MODEL — overrides the provider default for the intake agent
+  - AUDITOR_MODEL — overrides the provider default for the auditor agent
+  - HF_MODEL — default model when LLM_PROVIDER=huggingface and no per-agent override is set
+  - BEDROCK_MODEL — default model when LLM_PROVIDER=bedrock and no per-agent override is set
+  - GITHUB_COPILOT_MODEL — default model when LLM_PROVIDER=github-copilot and no per-agent override is set
+  - OLLAMA_MODEL — default model when LLM_PROVIDER=ollama and no per-agent override is set
 
 Best practices
 - Version Locking: always pin full model identifiers (e.g., Qwen/Qwen2.5-7B-Instruct). Avoid vague names like "qwen".
