@@ -57,13 +57,13 @@ pip install -e ".[dev]"
 
 The `-e` flag installs in editable mode — changes to the source are reflected immediately without reinstalling.
 
-### Option C — Install with ChromaDB support (Mode 3 RAG)
+### Option C — Install with RAG support (Mode 3)
 
 ```bash
 pip install "adag[rag]"
 ```
 
-This adds the `chromadb` dependency for local vector store support.
+This adds the `requests` dependency used to call the external RAG microservices. The microservices themselves (including ChromaDB) run in a separate stack — see [docs/RAG_PIPELINE.md](RAG_PIPELINE.md) for setup.
 
 ---
 

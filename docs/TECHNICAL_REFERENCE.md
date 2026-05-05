@@ -268,10 +268,10 @@ class AgentState(TypedDict):
 
     # Set by intake node
     parsed_resources: List[TerraformResource]
+    resource_types: List[str]
 
     # Set by policy_analyst node
     retrieved_policies: List[Policy]
-    resource_types: List[str]
 
     # Set by auditor node
     violations: List[Violation]

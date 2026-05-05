@@ -188,10 +188,8 @@ def query_rag(question: str) -> dict[str, Any]:
         }
 
     import requests
-    from rag_service_config import CONTEXT_AUG_URL, APPID
-
-    appid = os.getenv("ADAG_APPID", APPID)
-    url = CONTEXT_AUG_URL.format(appid=appid)
+    appid = os.getenv("ADAG_APPID", "archapp")
+    url   = os.getenv("RAG_CONTEXT_URL", "http://localhost:8000") + f"/context-augment/{appid}"
     try:
         response = requests.post(
             url,
@@ -242,17 +240,18 @@ def ingest_document(path: str) -> dict[str, Any]:
         return {"error": f"File not found: {path}"}
 
     import requests
-    from rag_service_config import INGESTION_URL, APPID
-
-    appid = os.getenv("ADAG_APPID", APPID)
-    url = INGESTION_URL.format(appid=appid)
+    appid = os.getenv("ADAG_APPID", "archapp")
+    url   = os.getenv("RAG_INGEST_URL", "http://localhost:8001") + f"/ingest/{appid}"
     try:
-        with doc_path.open("rb") as fh:
-            response = requests.post(
-                url,
-                files={"file": (doc_path.name, fh)},
-                timeout=60,
-            )
+        payload = {
+            "source_type": "local",
+            "config": {"paths": [str(doc_path.resolve())]},
+        }
+        response = requests.post(
+            url,
+            json=payload,
+            timeout=60,
+        )
         response.raise_for_status()
         return {
             "ingested": path,

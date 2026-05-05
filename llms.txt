@@ -51,8 +51,8 @@ Best practices
 - Determinism: for structured outputs, set temperature to 0–0.1 and include strict schema instructions.
 
 RAG and embeddings
-- This repo supports RAG (Chroma) via RAG_PROVIDER and CHROMA_PERSIST_DIR in .env/.env.example.
-- Choose an embeddings model compatible with your provider and pin its identifier.
+- RAG runs as five external microservices (ingestion, chunking, embedding, vector store, context augmentation).
+- Enable with USE_RAG=true and configure RAG_CONTEXT_URL / RAG_INGEST_URL etc. in .env. See docs/RAG_PIPELINE.md.
 - For large document sets, chunk documents and use semantic retrieval to stay within context limits.
 
 Security
