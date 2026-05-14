@@ -74,4 +74,4 @@ Provenance and license
 - License: MIT (see LICENSE in repo root).
 
 Maintainer
-- M T <m3d.suhail@gmail.com>
+- https://github.com/m3dcodie/
