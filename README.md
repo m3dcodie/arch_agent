@@ -177,10 +177,10 @@ If `INTAKE_MODEL` or `AUDITOR_MODEL` are unset, both agents use the provider def
 
 The auditor performs deterministic compliance checking — the same Terraform input must always produce the same pass/fail result. Two variables control this across all providers:
 
-| Variable | Default | Notes |
-| --- | --- | --- |
-| `LLM_TEMPERATURE` | `0` | **Keep at 0.** Temperature > 0 introduces randomness that can flip pass/fail results or corrupt JSON output. `top_k` and `top_p` are irrelevant at temperature 0 (greedy decoding ignores them). |
-| `LLM_MAX_TOKENS` | `4096` | Caps response length. Raise to `8192` for large files with many resources and violations. |
+| Variable          | Default | Notes                                                                                                                                                                                            |
+| ----------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `LLM_TEMPERATURE` | `0`     | **Keep at 0.** Temperature > 0 introduces randomness that can flip pass/fail results or corrupt JSON output. `top_k` and `top_p` are irrelevant at temperature 0 (greedy decoding ignores them). |
+| `LLM_MAX_TOKENS`  | `4096`  | Caps response length. Raise to `8192` for large files with many resources and violations.                                                                                                        |
 
 Both vars apply to all providers. Use provider-specific overrides (`BEDROCK_MAX_TOKENS`, `HF_TEMPERATURE`, etc.) only when you need a different value for one provider. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full override reference.
 
