@@ -16,23 +16,23 @@ All ADAG configuration is done via environment variables, either in a `.env` fil
 
 ### Core
 
-| Variable       | Default          | Description                                                                         |
-| -------------- | ---------------- | ----------------------------------------------------------------------------------- |
-| `LLM_PROVIDER` | `bedrock`        | LLM backend. One of: `bedrock`, `github-copilot`, `huggingface`, `ollama`           |
-| `USE_RAG`      | `false`          | Enable RAG microservices pipeline. `true` = Mode 3, `false` = offline disk mode     |
-| `ADAG_APPID`   | `archapp`        | Application ID sent to RAG microservices. Used to namespace policy collections.     |
-| `DB_PROVIDER`  | `sqlite`         | Database backend for LangGraph checkpointing. Currently only `sqlite` is supported. |
-| `DB_PATH`      | `./data/adag.db` | Path to the SQLite database file used for LangGraph checkpoints.                    |
+| Variable       | Default          | Description                                                                                |
+| -------------- | ---------------- | ------------------------------------------------------------------------------------------ |
+| `LLM_PROVIDER` | `bedrock`        | LLM backend. One of: `bedrock`, `github-models`, `github-copilot`, `huggingface`, `ollama` |
+| `USE_RAG`      | `false`          | Enable RAG microservices pipeline. `true` = Mode 3, `false` = offline disk mode            |
+| `ADAG_APPID`   | `archapp`        | Application ID sent to RAG microservices. Used to namespace policy collections.            |
+| `DB_PROVIDER`  | `sqlite`         | Database backend for LangGraph checkpointing. Currently only `sqlite` is supported.        |
+| `DB_PATH`      | `./data/adag.db` | Path to the SQLite database file used for LangGraph checkpoints.                           |
 
 ### AWS Bedrock
 
-| Variable          | Default                    | Description                                                                           |
-| ----------------- | -------------------------- | ------------------------------------------------------------------------------------- |
-| `AWS_PROFILE`     | _(AWS SDK default)_        | Named AWS credential profile to use.                                                  |
-| `AWS_REGION`      | `us-east-1`                | AWS region for Bedrock API calls.                                                     |
-| `BEDROCK_MODEL`   | `anthropic.claude-sonnet-4-5-20250929-v1:0` | Full Bedrock model ID, including cross-region inference profile prefix if applicable. |
-| `INTAKE_MODEL`    | _(same as BEDROCK_MODEL)_  | Override model for the intake agent role.                                             |
-| `AUDITOR_MODEL`   | _(same as BEDROCK_MODEL)_  | Override model for the auditor agent role.                                            |
+| Variable        | Default                                     | Description                                                                           |
+| --------------- | ------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `AWS_PROFILE`   | _(AWS SDK default)_                         | Named AWS credential profile to use.                                                  |
+| `AWS_REGION`    | `us-east-1`                                 | AWS region for Bedrock API calls.                                                     |
+| `BEDROCK_MODEL` | `anthropic.claude-sonnet-4-5-20250929-v1:0` | Full Bedrock model ID, including cross-region inference profile prefix if applicable. |
+| `INTAKE_MODEL`  | _(same as BEDROCK_MODEL)_                   | Override model for the intake agent role.                                             |
+| `AUDITOR_MODEL` | _(same as BEDROCK_MODEL)_                   | Override model for the auditor agent role.                                            |
 
 **Backwards compatibility:** `ANTHROPIC_MODEL` is still supported but deprecated. Use `BEDROCK_MODEL` for consistency with other providers.
 
@@ -47,7 +47,31 @@ All ADAG configuration is done via environment variables, either in a `.env` fil
 
 The provider auto-detects inference profile models (2-char prefix) and switches to the Converse API automatically.
 
-### GitHub Copilot
+### GitHub Models
+
+| Variable                    | Default             | Description                                                                                                                                                                                                      |
+| --------------------------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GITHUB_MODELS_TOKEN`       | _(required)_        | Fine-grained PAT with **GitHub Copilot → Read** + **Models → Read** account permissions. Create one at [github.com/settings/personal-access-tokens/new](https://github.com/settings/personal-access-tokens/new). |
+| `GITHUB_MODELS_MODEL`       | `openai/gpt-4.1`    | Default model for all agents. Use `vendor/model-id` format (e.g. `openai/gpt-4o-mini`).                                                                                                                          |
+| `INTAKE_MODEL`              | _(same as default)_ | Override model for the intake agent role.                                                                                                                                                                        |
+| `AUDITOR_MODEL`             | _(same as default)_ | Override model for the auditor agent role.                                                                                                                                                                       |
+| `GITHUB_MODELS_TEMPERATURE` | `0.1`               | Sampling temperature.                                                                                                                                                                                            |
+| `GITHUB_MODELS_MAX_TOKENS`  | `4096`              | Max completion tokens.                                                                                                                                                                                           |
+| `GITHUB_MODELS_TIMEOUT`     | `60`                | Request timeout in seconds.                                                                                                                                                                                      |
+
+**Available GitHub Models (as of May 2026):**
+
+| Model                         | Notes                                          |
+| ----------------------------- | ---------------------------------------------- |
+| `openai/gpt-4.1`              | Default — strong reasoning, policy analysis    |
+| `openai/gpt-4o-mini`          | Fast, cheap — ideal for intake structured JSON |
+| `openai/gpt-4o`               | Balanced quality/cost                          |
+| `openai/o1`                   | Maximum reasoning depth                        |
+| `meta/llama-3.3-70b-instruct` | Open-weights alternative                       |
+
+Model names use the `vendor/model-id` format as listed in the [GitHub Models marketplace](https://github.com/marketplace/models).
+
+### GitHub Copilot (IDE OAuth)
 
 | Variable               | Default             | Description                                                                                                                         |
 | ---------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
@@ -121,10 +145,13 @@ The provider auto-detects inference profile models (2-char prefix) and switches 
 Scans against policies loaded directly from disk. No external services required.
 
 ```ini
-# .env (Mode 1 — GitHub Copilot)
-LLM_PROVIDER=github-copilot
-GITHUB_COPILOT_TOKEN=ghu_your_token_here
-GITHUB_COPILOT_MODEL=gpt-4o
+# .env (Mode 1 — GitHub Models, recommended)
+LLM_PROVIDER=github-models
+GITHUB_MODELS_TOKEN=github_pat_your_token_here
+GITHUB_MODELS_MODEL=openai/gpt-4.1
+
+INTAKE_MODEL=openai/gpt-4o-mini
+AUDITOR_MODEL=openai/gpt-4.1
 
 USE_RAG=false
 
@@ -175,8 +202,9 @@ Or configured in Claude Desktop:
       "command": "python",
       "args": ["-m", "adag.mcp_server"],
       "env": {
-        "LLM_PROVIDER": "github-copilot",
-        "GITHUB_COPILOT_TOKEN": "ghu_your_token_here",
+        "LLM_PROVIDER": "github-models",
+        "GITHUB_MODELS_TOKEN": "github_pat_your_token_here",
+        "GITHUB_MODELS_MODEL": "openai/gpt-4.1",
         "USE_RAG": "false"
       }
     }
@@ -190,8 +218,9 @@ Requires the RAG microservices to be running. See [RAG_PIPELINE.md](RAG_PIPELINE
 
 ```ini
 # .env (Mode 3)
-LLM_PROVIDER=github-copilot
-GITHUB_COPILOT_TOKEN=ghu_your_token_here
+LLM_PROVIDER=github-models
+GITHUB_MODELS_TOKEN=github_pat_your_token_here
+GITHUB_MODELS_MODEL=openai/gpt-4.1
 
 USE_RAG=true
 ADAG_APPID=archapp
@@ -221,16 +250,26 @@ Copy this to `.env` in the project root and fill in the values for your chosen p
 
 # ------------------------------------------------------------
 # REQUIRED: LLM Provider
-# Options: bedrock | github-copilot | huggingface | ollama
+# Options: bedrock | github-models | github-copilot | huggingface | ollama
 # ------------------------------------------------------------
-LLM_PROVIDER=github-copilot
+LLM_PROVIDER=github-models
 
 # ------------------------------------------------------------
-# PROVIDER: GitHub Copilot
+# PROVIDER: GitHub Models (recommended for GitHub Copilot users)
+# Create a fine-grained PAT: https://github.com/settings/personal-access-tokens/new
+# Account permissions: GitHub Copilot → Read, Models → Read
 # ------------------------------------------------------------
-GITHUB_COPILOT_TOKEN=ghu_your_token_here
-GITHUB_COPILOT_MODEL=gpt-4o
-# AUDITOR_MODEL=claude-sonnet-4.5     # Pro+ / Enterprise only
+GITHUB_MODELS_TOKEN=github_pat_your_token_here
+GITHUB_MODELS_MODEL=openai/gpt-4.1
+INTAKE_MODEL=openai/gpt-4o-mini
+AUDITOR_MODEL=openai/gpt-4.1
+
+# ------------------------------------------------------------
+# PROVIDER: GitHub Copilot IDE OAuth (comment out if using github-models)
+# ------------------------------------------------------------
+# LLM_PROVIDER=github-copilot
+# GITHUB_COPILOT_TOKEN=ghu_your_token_here
+# GITHUB_COPILOT_MODEL=gpt-4o
 
 # ------------------------------------------------------------
 # PROVIDER: AWS Bedrock (comment out if using Copilot)

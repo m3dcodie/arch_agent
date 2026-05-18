@@ -46,7 +46,7 @@ Status: FAILED  (exit code 1)
 - **Multi-agent graph** — three specialised agents (Intake, Policy Analyst, Auditor) orchestrated by LangGraph
 - **Deterministic parsing** — the HCL parser (`core/hcl_parser.py`) never calls an LLM; regex extraction eliminates false positives from hallucinated attribute values. All resource types present in the Terraform file are extracted and passed to the policy analyst and auditor — no hardcoded filter list
 - **10 built-in policies** — deletion protection, encryption at rest, public access block, multi-AZ, backup retention, KMS key rotation, allowed regions, required tagging, naming conventions
-- **Four LLM providers** — AWS Bedrock, GitHub Copilot, HuggingFace, Ollama (fully local); all support **per-agent model selection** (`INTAKE_MODEL`, `AUDITOR_MODEL`) so you can use a fast small model for parsing and a powerful reasoning model for policy judgement
+- **Five LLM providers** — AWS Bedrock, GitHub Models, GitHub Copilot (IDE), HuggingFace, Ollama (fully local); all support **per-agent model selection** (`INTAKE_MODEL`, `AUDITOR_MODEL`) so you can use a fast small model for parsing and a powerful reasoning model for policy judgement
 - **Three output formats** — human-readable text, JSON, SARIF 2.1.0 (GitHub Advanced Security)
 - **MCP server** — any MCP-compatible AI assistant (Claude Desktop, VS Code Copilot) can call ADAG as a tool
 - **RAG mode** — index your internal architecture docs and query them semantically at scan time
@@ -64,17 +64,19 @@ pip install adag
 
 ### 2. Configure an LLM provider
 
-**GitHub Copilot (recommended — no AWS needed):**
+**GitHub Models (recommended — works with any GitHub Copilot subscription):**
 
-```bash
-gh auth login --scopes 'copilot'
-gh auth status --show-token   # copy the ghu_... token
-```
+1. Create a fine-grained PAT at <https://github.com/settings/personal-access-tokens/new>
+   - Under **Account permissions**, enable:
+     - **GitHub Copilot** → Read
+     - **Models** → Read
+2. Copy the token (starts with `github_pat_…`)
 
 ```ini
 # .env
-LLM_PROVIDER=github-copilot
-GITHUB_COPILOT_TOKEN=ghu_your_token_here
+LLM_PROVIDER=github-models
+GITHUB_MODELS_TOKEN=github_pat_your_token_here
+GITHUB_MODELS_MODEL=openai/gpt-4.1
 ```
 
 **AWS Bedrock:**
@@ -130,12 +132,12 @@ ADAG applies the [LLM Capability Framework (LCF)](https://github.com/m3dcodie/LL
 Set `INTAKE_MODEL` and `AUDITOR_MODEL` independently to use the right tier for each job:
 
 ```ini
-# .env — GitHub Copilot example
-LLM_PROVIDER=github-copilot
-GITHUB_COPILOT_TOKEN=ghu_your_token_here
+# .env — GitHub Models example
+LLM_PROVIDER=github-models
+GITHUB_MODELS_TOKEN=github_pat_your_token_here
 
-INTAKE_MODEL=gpt-4.1                        # fast — structured JSON extraction
-AUDITOR_MODEL=claude-sonnet-4.5             # powerful — policy reasoning
+INTAKE_MODEL=openai/gpt-4o-mini             # fast — structured JSON extraction
+AUDITOR_MODEL=openai/gpt-4.1               # powerful — policy reasoning
 ```
 
 ```ini
@@ -307,8 +309,9 @@ Connect ADAG to Claude Desktop so it can check compliance mid-conversation:
       "command": "python",
       "args": ["-m", "adag.mcp_server"],
       "env": {
-        "LLM_PROVIDER": "github-copilot",
-        "GITHUB_COPILOT_TOKEN": "ghu_your_token_here",
+        "LLM_PROVIDER": "github-models",
+        "GITHUB_MODELS_TOKEN": "github_pat_your_token_here",
+        "GITHUB_MODELS_MODEL": "openai/gpt-4.1",
         "USE_RAG": "false"
       }
     }
