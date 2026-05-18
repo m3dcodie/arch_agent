@@ -291,12 +291,17 @@ def log_llm_cost(
     agent_role: str = "unknown",
     prompt_text: Optional[str] = None,
     response_text: Optional[str] = None,
+    duration_ms: Optional[float] = None,
 ) -> None:
     """Extract token counts from *usage_metadata* and emit a ``[COST]`` log.
 
     *usage_metadata* is LangChain's normalised ``AIMessage.usage_metadata``
     dict (keys: ``input_tokens``, ``output_tokens``, ``total_tokens``).
     An empty or ``None`` dict logs a zero-token record.
+
+    *duration_ms* is the wall-clock time (milliseconds) for the LLM network
+    call, measured by the caller.  When supplied it is included in both the
+    text log line and the structured ``llm.invoke`` audit event.
 
     When *prompt_text* or *response_text* are supplied the log line also
     includes ``local_prompt_tokens`` and ``local_response_tokens`` — counts
@@ -339,7 +344,8 @@ def log_llm_cost(
     logger.info(
         "[COST] provider=%s model=%s agent=%s "
         "input_tokens=%d output_tokens=%d total_tokens=%d "
-        "estimated_cost_usd=%s local_prompt_tokens=%s local_response_tokens=%s",
+        "estimated_cost_usd=%s local_prompt_tokens=%s local_response_tokens=%s"
+        "%s",
         provider,
         model,
         agent_role,
@@ -349,5 +355,28 @@ def log_llm_cost(
         cost_str,
         local_prompt_str,
         local_response_str,
+        f" duration_ms={duration_ms:.1f}" if duration_ms is not None else "",
     )
+
+    # Emit a machine-readable structured event alongside the text log.
+    try:
+        from core.audit_logger import audit_event as _audit_event
+
+        _audit_event(
+            "llm.invoke",
+            agent=agent_role,
+            provider=provider,
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            cost_usd=cost,
+            cost_label=cost_str,
+            local_prompt_tokens=local_prompt,
+            local_response_tokens=local_response,
+            duration_ms=duration_ms,
+        )
+    except Exception:
+        pass  # Never let audit logging break the main path.
+
     log_cost_comparison(provider, model, input_tokens, output_tokens, agent_role, prompt_text)

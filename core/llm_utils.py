@@ -33,6 +33,18 @@ _RATE_LIMIT_SIGNALS = (
     "access to this endpoint is forbidden",  # GitHub Copilot transient 403
 )
 
+# Signals that definitively identify a *permanent* denial — never retry these
+# even if the message would otherwise match a rate-limit signal.
+# E.g. openai.PermissionDeniedError: "Access to this endpoint is forbidden.
+# Please review our Terms of Service."
+_PERMANENT_DENIAL_SIGNALS = (
+    "terms of service",
+    "your account",
+    "account has been",
+    "suspended",
+    "billing",
+)
+
 # Maximum number of attempts before giving up.
 _MAX_RETRIES = 3
 
@@ -48,7 +60,24 @@ except ImportError:  # pragma: no cover
     _ChatOpenAI = None  # type: ignore[assignment,misc]
 
 
+def _is_permanent_denial(exc: Exception) -> bool:
+    """Return True when the exception signals a non-retriable permanent denial.
+
+    Permanent denials include Terms-of-Service violations, account suspensions,
+    and billing issues.  Retrying these wastes time and quota.
+    """
+    msg = str(exc).lower()
+    return any(signal in msg for signal in _PERMANENT_DENIAL_SIGNALS)
+
+
 def _is_rate_limit(exc: Exception) -> bool:
+    """Return True when the exception is a transient throttle that warrants a retry.
+
+    Excludes permanent denials (e.g. ToS violations) even when the HTTP status
+    code or message text would otherwise look like a rate-limit signal.
+    """
+    if _is_permanent_denial(exc):
+        return False
     msg = str(exc).lower()
     return any(signal in msg for signal in _RATE_LIMIT_SIGNALS)
 
@@ -142,6 +171,8 @@ def invoke_structured(
     except Exception:
         prompt_text = None
 
+    from core.audit_logger import audit_event as _audit_event
+
     for attempt in range(_MAX_RETRIES):
         # === Structured output path ===
         try:
@@ -150,45 +181,107 @@ def invoke_structured(
                 structured_kwargs["method"] = "function_calling"
 
             chain = prompt | llm.with_structured_output(schema, **structured_kwargs)
+            t0 = time.perf_counter()
             raw_result = chain.invoke(inputs)
+            llm_duration_ms = round((time.perf_counter() - t0) * 1000, 2)
 
             parsed = raw_result.get("parsed") if isinstance(raw_result, dict) else None
             if parsed is not None:
                 raw_msg = raw_result.get("raw")
                 usage: dict = getattr(raw_msg, "usage_metadata", None) or {}
                 response_text: str | None = getattr(raw_msg, "content", None)
-                log_llm_cost(llm, usage, agent_role, prompt_text=prompt_text, response_text=response_text)
+                log_llm_cost(
+                    llm, usage, agent_role,
+                    prompt_text=prompt_text, response_text=response_text,
+                    duration_ms=llm_duration_ms,
+                )
                 return parsed
             # parsed is None (parse error despite successful API call) —
             # fall through to the plain-invoke fallback below.
 
         except Exception as exc:
+            if _is_permanent_denial(exc):
+                # Non-retriable: log clearly and re-raise immediately.
+                logger.error(
+                    "[LLM] Permanent API denial — not retrying. agent=%s error=%s",
+                    agent_role,
+                    exc,
+                )
+                _audit_event(
+                    "llm.denied",
+                    level=40,  # logging.ERROR
+                    agent=agent_role,
+                    error=str(exc),
+                    error_type=type(exc).__name__,
+                )
+                raise
+
             if _is_rate_limit(exc):
                 wait = _RETRY_BASE_WAIT * (2 ** attempt)
                 logger.warning(
-                    "[LLM] Rate limited — retrying in %ds (attempt %d/%d)",
+                    "[LLM] Throttled (transient) — retrying in %ds (attempt %d/%d) agent=%s",
                     wait,
                     attempt + 1,
                     _MAX_RETRIES,
+                    agent_role,
+                )
+                _audit_event(
+                    "llm.retry",
+                    agent=agent_role,
+                    attempt=attempt + 1,
+                    max_attempts=_MAX_RETRIES,
+                    wait_seconds=wait,
+                    error=str(exc),
                 )
                 time.sleep(wait)
                 last_exc = exc
                 continue
-            # Non-rate-limit error — fall through to plain-invoke fallback.
+            # Non-rate-limit, non-permanent error — fall through to plain-invoke fallback.
 
         # === Plain-invoke fallback ===
         try:
+            t0 = time.perf_counter()
             parsed, usage, response_text = _plain_invoke(llm, prompt, inputs, schema)
-            log_llm_cost(llm, usage, agent_role, prompt_text=prompt_text, response_text=response_text)
+            llm_duration_ms = round((time.perf_counter() - t0) * 1000, 2)
+            log_llm_cost(
+                llm, usage, agent_role,
+                prompt_text=prompt_text, response_text=response_text,
+                duration_ms=llm_duration_ms,
+            )
             return parsed
         except Exception as plain_exc:
+            if _is_permanent_denial(plain_exc):
+                logger.error(
+                    "[LLM] Permanent API denial — not retrying. agent=%s error=%s",
+                    agent_role,
+                    plain_exc,
+                )
+                _audit_event(
+                    "llm.denied",
+                    level=40,  # logging.ERROR
+                    agent=agent_role,
+                    error=str(plain_exc),
+                    error_type=type(plain_exc).__name__,
+                )
+                raise
+
             if _is_rate_limit(plain_exc):
                 wait = _RETRY_BASE_WAIT * (2 ** attempt)
                 logger.warning(
-                    "[LLM] Rate limited (plain fallback) — retrying in %ds (attempt %d/%d)",
+                    "[LLM] Throttled (transient, plain fallback) — retrying in %ds (attempt %d/%d) agent=%s",
                     wait,
                     attempt + 1,
                     _MAX_RETRIES,
+                    agent_role,
+                )
+                _audit_event(
+                    "llm.retry",
+                    agent=agent_role,
+                    attempt=attempt + 1,
+                    max_attempts=_MAX_RETRIES,
+                    wait_seconds=wait,
+                    error=str(plain_exc),
+                    path="plain_fallback",
                 )
                 time.sleep(wait)
                 last_exc = plain_exc

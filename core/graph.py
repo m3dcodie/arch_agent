@@ -2,19 +2,23 @@
 LangGraph workflow construction for the ADAG system.
 """
 
+import logging
 import os
 import uuid
-from typing import Optional
+from typing import Any, Callable, Optional
 from langgraph.graph import StateGraph, END
 from langchain_core.language_models import BaseChatModel
 
 from core.state import AgentState
 from core.llm_provider import LLMFactory
 from core.database_provider import DatabaseFactory
+from core.audit_logger import AuditSpan
 from agents.intake import intake_node
 from agents.policy_analyst import policy_analyst_node
 from agents.auditor import auditor_node
 from models.violations import AuditStatus
+
+logger = logging.getLogger(__name__)
 
 
 class ADAGGraph:
@@ -56,6 +60,31 @@ class ADAGGraph:
         # Build the graph
         self.graph = self._build_graph()
 
+    @staticmethod
+    def _timed_node(name: str, fn: Callable) -> Callable:
+        """
+        Wrap a LangGraph node function with an AuditSpan so every agent
+        execution emits ``agent.start`` / ``agent.complete`` / ``agent.error``
+        events with ``duration_ms`` and key result metrics.
+        """
+        def wrapper(state: Any) -> Any:
+            with AuditSpan("agent", agent=name) as span:
+                result = fn(state)
+                if isinstance(result, dict):
+                    if "parsed_resources" in result:
+                        span.set(resources_parsed=len(result["parsed_resources"]))
+                    if "retrieved_policies" in result:
+                        span.set(policies_retrieved=len(result["retrieved_policies"]))
+                    if "violations" in result:
+                        span.set(violations_found=len(result["violations"]))
+                    status = result.get("status")
+                    if status is not None:
+                        span.set(
+                            status=status.value if hasattr(status, "value") else str(status)
+                        )
+            return result
+        return wrapper
+
     def _get_llm_for_role(self, role: str) -> BaseChatModel:
         """
         Return an LLM instance for a specific agent role.
@@ -94,11 +123,18 @@ class ADAGGraph:
         # Create the state graph
         workflow = StateGraph(AgentState)
 
-        # Add nodes with per-agent LLM binding
-        workflow.add_node("intake", lambda state: intake_node(state, self.intake_llm))
-        workflow.add_node("policy_analyst", lambda state: policy_analyst_node(state))
+        # Add nodes with per-agent LLM binding, each wrapped with a timing span.
         workflow.add_node(
-            "auditor", lambda state: auditor_node(state, self.auditor_llm)
+            "intake",
+            self._timed_node("intake", lambda state: intake_node(state, self.intake_llm)),
+        )
+        workflow.add_node(
+            "policy_analyst",
+            self._timed_node("policy_analyst", lambda state: policy_analyst_node(state)),
+        )
+        workflow.add_node(
+            "auditor",
+            self._timed_node("auditor", lambda state: auditor_node(state, self.auditor_llm)),
         )
 
         # Define the flow

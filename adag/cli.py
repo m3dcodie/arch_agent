@@ -18,13 +18,11 @@ from dotenv import load_dotenv, find_dotenv
 
 load_dotenv(find_dotenv(usecwd=True))
 
-# Configure logging once at import time.
-# Default to WARNING so normal runs are silent; set LOG_LEVEL=INFO (or DEBUG)
-# in .env or the shell to surface [COST] lines and other informational output.
-logging.basicConfig(
-    level=os.getenv("LOG_LEVEL", "WARNING").upper(),
-    format="%(levelname)s %(name)s: %(message)s",
-)
+# Configure structured logging once at import time.
+# LOG_LEVEL=INFO  → show timing, cost, and agent events (default: WARNING)
+# LOG_FORMAT=json → machine-readable JSON lines (default: text)
+from core.logging_config import configure_logging  # noqa: E402
+configure_logging()
 
 
 @click.group()
