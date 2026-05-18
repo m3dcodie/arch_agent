@@ -37,6 +37,9 @@ rag = [
 ollama = [
     "langchain-ollama>=0.2.0",
 ]
+hf = [
+    "transformers>=4.40.0",
+]
 dev = [
     "pytest>=8.3.3",
     "pytest-asyncio>=0.24.0",

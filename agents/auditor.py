@@ -105,7 +105,9 @@ def auditor_node(state: AgentState, llm: BaseChatModel) -> Dict[str, Any]:
             )
 
         prompt = ChatPromptTemplate.from_template(prompt_text)
-        result = invoke_structured(llm, prompt, {"resources_json": resources_json}, ViolationList)
+        result = invoke_structured(
+            llm, prompt, {"resources_json": resources_json}, ViolationList, agent_role="auditor"
+        )
 
         violations = result.violations if result else []
         _assign_violation_ids(violations)

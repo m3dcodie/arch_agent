@@ -16,6 +16,8 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel
 
+from core.cost_tracker import log_llm_cost
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=BaseModel)
@@ -56,7 +58,7 @@ def _plain_invoke(
     prompt: ChatPromptTemplate,
     inputs: dict,
     schema: Type[T],
-) -> T:
+) -> tuple[T, dict, str]:
     """
     Invoke the LLM without structured-output support and parse the raw JSON
     response into `schema`.
@@ -64,11 +66,19 @@ def _plain_invoke(
     Used as a fallback for providers that do not support tool/function calling
     (e.g. Ollama, HuggingFace router models).
 
+    Returns:
+        A ``(parsed_schema, usage_metadata, response_text)`` tuple.
+        ``usage_metadata`` is the LangChain-normalised dict from
+        ``AIMessage.usage_metadata`` (may be an empty dict if the provider
+        does not expose it).  ``response_text`` is the raw model output after
+        stripping chain-of-thought tags and markdown fences.
+
     Raises:
         ValueError: if no valid JSON object is found in the model output.
     """
     chain = prompt | llm
     response = chain.invoke(inputs)
+    usage: dict = getattr(response, "usage_metadata", None) or {}
     raw = response.content if hasattr(response, "content") else str(response)
     # Strip chain-of-thought tags produced by some reasoning models.
     raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
@@ -77,7 +87,7 @@ def _plain_invoke(
     match = re.search(r"\{.*\}", raw, re.DOTALL)
     if not match:
         raise ValueError(f"No JSON object found in model output: {raw[:300]}")
-    return schema(**json.loads(match.group()))
+    return schema(**json.loads(match.group())), usage, raw
 
 
 def invoke_structured(
@@ -85,23 +95,33 @@ def invoke_structured(
     prompt: ChatPromptTemplate,
     inputs: dict,
     schema: Type[T],
+    agent_role: str = "unknown",
 ) -> T:
     """
     Invoke the LLM and parse the result into a Pydantic model.
 
     Strategy:
-    1. Attempt ``llm.with_structured_output(schema)`` (native tool/function calling).
+    1. Attempt ``llm.with_structured_output(schema, include_raw=True)`` (native
+       tool/function calling).  ``include_raw=True`` returns
+       ``{"raw": AIMessage, "parsed": T | None, "parsing_error": ...}`` so
+       token-usage metadata can be extracted from the raw message.
        OpenAI-compatible providers (including GitHub Copilot) require
        ``method="function_calling"`` to avoid strict-mode validation errors in
        langchain-openai >= 0.3.
-    2. On any non-rate-limit failure, fall back to plain-invoke + JSON extraction.
+    2. On any non-rate-limit failure, or when ``parsed`` is ``None`` (parse
+       error despite a successful API call), fall back to plain-invoke + JSON
+       extraction.
     3. Retry up to ``_MAX_RETRIES`` times with exponential backoff on 429 errors.
+    4. Log token usage and estimated cost via :func:`core.cost_tracker.log_llm_cost`
+       after every successful invocation.
 
     Args:
-        llm:    Configured LangChain chat model.
-        prompt: ChatPromptTemplate to apply.
-        inputs: Template variable values.
-        schema: Pydantic model class to deserialise the response into.
+        llm:        Configured LangChain chat model.
+        prompt:     ChatPromptTemplate to apply.
+        inputs:     Template variable values.
+        schema:     Pydantic model class to deserialise the response into.
+        agent_role: Name of the calling agent node used in cost log lines
+                    (e.g. ``"auditor"``).  Defaults to ``"unknown"``.
 
     Returns:
         An instance of ``schema`` populated from the LLM response.
@@ -111,15 +131,36 @@ def invoke_structured(
     """
     last_exc: Exception = RuntimeError("No attempts made")
 
+    # Render prompt text once so local tokenizer can count tokens without
+    # repeating the formatting work inside the retry loop.
+    try:
+        rendered_messages = prompt.format_messages(**inputs)
+        prompt_text: str | None = "\n".join(
+            m.content if isinstance(m.content, str) else str(m.content)
+            for m in rendered_messages
+        )
+    except Exception:
+        prompt_text = None
+
     for attempt in range(_MAX_RETRIES):
+        # === Structured output path ===
         try:
-            structured_kwargs = (
-                {"method": "function_calling"}
-                if (_ChatOpenAI is not None and isinstance(llm, _ChatOpenAI))
-                else {}
-            )
+            structured_kwargs: dict = {"include_raw": True}
+            if _ChatOpenAI is not None and isinstance(llm, _ChatOpenAI):
+                structured_kwargs["method"] = "function_calling"
+
             chain = prompt | llm.with_structured_output(schema, **structured_kwargs)
-            return chain.invoke(inputs)
+            raw_result = chain.invoke(inputs)
+
+            parsed = raw_result.get("parsed") if isinstance(raw_result, dict) else None
+            if parsed is not None:
+                raw_msg = raw_result.get("raw")
+                usage: dict = getattr(raw_msg, "usage_metadata", None) or {}
+                response_text: str | None = getattr(raw_msg, "content", None)
+                log_llm_cost(llm, usage, agent_role, prompt_text=prompt_text, response_text=response_text)
+                return parsed
+            # parsed is None (parse error despite successful API call) —
+            # fall through to the plain-invoke fallback below.
 
         except Exception as exc:
             if _is_rate_limit(exc):
@@ -133,22 +174,25 @@ def invoke_structured(
                 time.sleep(wait)
                 last_exc = exc
                 continue
+            # Non-rate-limit error — fall through to plain-invoke fallback.
 
-            # Non-rate-limit error: fall back to plain JSON invoke immediately.
-            try:
-                return _plain_invoke(llm, prompt, inputs, schema)
-            except Exception as plain_exc:
-                if _is_rate_limit(plain_exc):
-                    wait = _RETRY_BASE_WAIT * (2 ** attempt)
-                    logger.warning(
-                        "[LLM] Rate limited (plain fallback) — retrying in %ds (attempt %d/%d)",
-                        wait,
-                        attempt + 1,
-                        _MAX_RETRIES,
-                    )
-                    time.sleep(wait)
-                    last_exc = plain_exc
-                    continue
-                raise plain_exc
+        # === Plain-invoke fallback ===
+        try:
+            parsed, usage, response_text = _plain_invoke(llm, prompt, inputs, schema)
+            log_llm_cost(llm, usage, agent_role, prompt_text=prompt_text, response_text=response_text)
+            return parsed
+        except Exception as plain_exc:
+            if _is_rate_limit(plain_exc):
+                wait = _RETRY_BASE_WAIT * (2 ** attempt)
+                logger.warning(
+                    "[LLM] Rate limited (plain fallback) — retrying in %ds (attempt %d/%d)",
+                    wait,
+                    attempt + 1,
+                    _MAX_RETRIES,
+                )
+                time.sleep(wait)
+                last_exc = plain_exc
+                continue
+            raise plain_exc
 
     raise last_exc

@@ -8,6 +8,7 @@ Usage:
     adag scan ./infra/ --format sarif > results.sarif.json
 """
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -16,6 +17,14 @@ import click
 from dotenv import load_dotenv, find_dotenv
 
 load_dotenv(find_dotenv(usecwd=True))
+
+# Configure logging once at import time.
+# Default to WARNING so normal runs are silent; set LOG_LEVEL=INFO (or DEBUG)
+# in .env or the shell to surface [COST] lines and other informational output.
+logging.basicConfig(
+    level=os.getenv("LOG_LEVEL", "WARNING").upper(),
+    format="%(levelname)s %(name)s: %(message)s",
+)
 
 
 @click.group()
