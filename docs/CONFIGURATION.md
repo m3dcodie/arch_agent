@@ -16,23 +16,26 @@ All ADAG configuration is done via environment variables, either in a `.env` fil
 
 ### Core
 
-| Variable       | Default          | Description                                                                                |
-| -------------- | ---------------- | ------------------------------------------------------------------------------------------ |
-| `LLM_PROVIDER` | `bedrock`        | LLM backend. One of: `bedrock`, `github-models`, `github-copilot`, `huggingface`, `ollama` |
-| `USE_RAG`      | `false`          | Enable RAG microservices pipeline. `true` = Mode 3, `false` = offline disk mode            |
-| `ADAG_APPID`   | `archapp`        | Application ID sent to RAG microservices. Used to namespace policy collections.            |
-| `DB_PROVIDER`  | `sqlite`         | Database backend for LangGraph checkpointing. Currently only `sqlite` is supported.        |
-| `DB_PATH`      | `./data/adag.db` | Path to the SQLite database file used for LangGraph checkpoints.                           |
+| Variable          | Default          | Description                                                                                                                                                                        |
+| ----------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LLM_PROVIDER`    | `bedrock`        | LLM backend. One of: `bedrock`, `github-models`, `github-copilot`, `huggingface`, `ollama`                                                                                         |
+| `LLM_TEMPERATURE` | `0`              | Sampling temperature for all providers. **Keep at 0** — auditor is deterministic compliance checking. Override per-provider with `BEDROCK_TEMPERATURE`, `OLLAMA_TEMPERATURE`, etc. |
+| `LLM_MAX_TOKENS`  | `4096`           | Max output tokens for all providers. Override per-provider with `BEDROCK_MAX_TOKENS`, `HF_MAX_TOKENS`, etc. Ollama uses `OLLAMA_NUM_PREDICT` instead (default `-1` = unlimited).   |
+| `USE_RAG`         | `false`          | Enable RAG microservices pipeline. `true` = Mode 3, `false` = offline disk mode                                                                                                    |
+| `ADAG_APPID`      | `archapp`        | Application ID sent to RAG microservices. Used to namespace policy collections.                                                                                                    |
+| `DB_PROVIDER`     | `sqlite`         | Database backend for LangGraph checkpointing. Currently only `sqlite` is supported.                                                                                                |
+| `DB_PATH`         | `./data/adag.db` | Path to the SQLite database file used for LangGraph checkpoints.                                                                                                                   |
 
 ### AWS Bedrock
 
-| Variable        | Default                                     | Description                                                                           |
-| --------------- | ------------------------------------------- | ------------------------------------------------------------------------------------- |
-| `AWS_PROFILE`   | _(AWS SDK default)_                         | Named AWS credential profile to use.                                                  |
-| `AWS_REGION`    | `us-east-1`                                 | AWS region for Bedrock API calls.                                                     |
-| `BEDROCK_MODEL` | `anthropic.claude-sonnet-4-5-20250929-v1:0` | Full Bedrock model ID, including cross-region inference profile prefix if applicable. |
-| `INTAKE_MODEL`  | _(same as BEDROCK_MODEL)_                   | Override model for the intake agent role.                                             |
-| `AUDITOR_MODEL` | _(same as BEDROCK_MODEL)_                   | Override model for the auditor agent role.                                            |
+| Variable              | Default                                     | Description                                                                           |
+| --------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `AWS_PROFILE`         | _(AWS SDK default)_                         | Named AWS credential profile to use.                                                  |
+| `AWS_REGION`          | `us-east-1`                                 | AWS region for Bedrock API calls.                                                     |
+| `BEDROCK_MODEL`       | `anthropic.claude-sonnet-4-5-20250929-v1:0` | Full Bedrock model ID, including cross-region inference profile prefix if applicable. |
+| `BEDROCK_TEMPERATURE` | `0`                                         | Sampling temperature. **Keep at 0** — auditor is deterministic compliance checking.   |
+| `INTAKE_MODEL`        | _(same as BEDROCK_MODEL)_                   | Override model for the intake agent role.                                             |
+| `AUDITOR_MODEL`       | _(same as BEDROCK_MODEL)_                   | Override model for the auditor agent role.                                            |
 
 **Backwards compatibility:** `ANTHROPIC_MODEL` is still supported but deprecated. Use `BEDROCK_MODEL` for consistency with other providers.
 
@@ -55,7 +58,7 @@ The provider auto-detects inference profile models (2-char prefix) and switches 
 | `GITHUB_MODELS_MODEL`       | `openai/gpt-4.1`    | Default model for all agents. Use `vendor/model-id` format (e.g. `openai/gpt-4o-mini`).                                                                                                                          |
 | `INTAKE_MODEL`              | _(same as default)_ | Override model for the intake agent role.                                                                                                                                                                        |
 | `AUDITOR_MODEL`             | _(same as default)_ | Override model for the auditor agent role.                                                                                                                                                                       |
-| `GITHUB_MODELS_TEMPERATURE` | `0.1`               | Sampling temperature.                                                                                                                                                                                            |
+| `GITHUB_MODELS_TEMPERATURE` | `0`                 | Sampling temperature. **Keep at 0** for deterministic compliance output.                                                                                                                                         |
 | `GITHUB_MODELS_MAX_TOKENS`  | `4096`              | Max completion tokens.                                                                                                                                                                                           |
 | `GITHUB_MODELS_TIMEOUT`     | `60`                | Request timeout in seconds.                                                                                                                                                                                      |
 
@@ -91,12 +94,14 @@ Model names use the `vendor/model-id` format as listed in the [GitHub Models mar
 
 ### HuggingFace
 
-| Variable        | Default                    | Description                                                                                          |
-| --------------- | -------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `HF_TOKEN`      | _(required)_               | HuggingFace API token from [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens). |
-| `HF_MODEL`      | `Qwen/Qwen2.5-7B-Instruct` | Default model served via HuggingFace Inference Router.                                               |
-| `INTAKE_MODEL`  | _(same as HF_MODEL)_       | Override model for the intake agent role.                                                            |
-| `AUDITOR_MODEL` | _(same as HF_MODEL)_       | Override model for the auditor agent role.                                                           |
+| Variable         | Default                    | Description                                                                                          |
+| ---------------- | -------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `HF_TOKEN`       | _(required)_               | HuggingFace API token from [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens). |
+| `HF_MODEL`       | `Qwen/Qwen2.5-7B-Instruct` | Default model served via HuggingFace Inference Router.                                               |
+| `HF_TEMPERATURE` | `0`                        | Sampling temperature. **Keep at 0** for deterministic compliance output.                             |
+| `HF_MAX_TOKENS`  | `4096`                     | Max completion tokens. 4096 handles large Terraform files with many violations.                      |
+| `INTAKE_MODEL`   | _(same as HF_MODEL)_       | Override model for the intake agent role.                                                            |
+| `AUDITOR_MODEL`  | _(same as HF_MODEL)_       | Override model for the auditor agent role.                                                           |
 
 **Recommended HuggingFace models for auditing:**
 
@@ -108,13 +113,14 @@ Model names use the `vendor/model-id` format as listed in the [GitHub Models mar
 
 ### Ollama
 
-| Variable          | Default                  | Description                                                             |
-| ----------------- | ------------------------ | ----------------------------------------------------------------------- |
-| `OLLAMA_MODEL`    | `deepseek-r1:8b`         | Model name as shown in `ollama list`.                                   |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Base URL of the Ollama server.                                          |
-| `OLLAMA_TIMEOUT`  | `120`                    | Request timeout in seconds. Increase for large models on slow hardware. |
-| `INTAKE_MODEL`    | _(same as OLLAMA_MODEL)_ | Override model for the intake agent role.                               |
-| `AUDITOR_MODEL`   | _(same as OLLAMA_MODEL)_ | Override model for the auditor agent role.                              |
+| Variable             | Default                  | Description                                                              |
+| -------------------- | ------------------------ | ------------------------------------------------------------------------ |
+| `OLLAMA_MODEL`       | `deepseek-r1:8b`         | Model name as shown in `ollama list`.                                    |
+| `OLLAMA_BASE_URL`    | `http://localhost:11434` | Base URL of the Ollama server.                                           |
+| `OLLAMA_TEMPERATURE` | `0`                      | Sampling temperature. **Keep at 0** for deterministic compliance output. |
+| `OLLAMA_TIMEOUT`     | `120`                    | Request timeout in seconds. Increase for large models on slow hardware.  |
+| `INTAKE_MODEL`       | _(same as OLLAMA_MODEL)_ | Override model for the intake agent role.                                |
+| `AUDITOR_MODEL`      | _(same as OLLAMA_MODEL)_ | Override model for the auditor agent role.                               |
 
 ### RAG Microservices (Mode 3 only)
 

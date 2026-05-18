@@ -77,6 +77,8 @@ pip install adag
 LLM_PROVIDER=github-models
 GITHUB_MODELS_TOKEN=github_pat_your_token_here
 GITHUB_MODELS_MODEL=openai/gpt-4.1
+LLM_TEMPERATURE=0       # greedy decoding — required for deterministic compliance results
+LLM_MAX_TOKENS=4096     # cap output length; increase for very large Terraform files
 ```
 
 **AWS Bedrock:**
@@ -170,6 +172,17 @@ AUDITOR_MODEL=deepseek-r1:32b           # stronger reasoning model
 ```
 
 If `INTAKE_MODEL` or `AUDITOR_MODEL` are unset, both agents use the provider default.
+
+#### Sampling parameters
+
+The auditor performs deterministic compliance checking — the same Terraform input must always produce the same pass/fail result. Two variables control this across all providers:
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `LLM_TEMPERATURE` | `0` | **Keep at 0.** Temperature > 0 introduces randomness that can flip pass/fail results or corrupt JSON output. `top_k` and `top_p` are irrelevant at temperature 0 (greedy decoding ignores them). |
+| `LLM_MAX_TOKENS` | `4096` | Caps response length. Raise to `8192` for large files with many resources and violations. |
+
+Both vars apply to all providers. Use provider-specific overrides (`BEDROCK_MAX_TOKENS`, `HF_TEMPERATURE`, etc.) only when you need a different value for one provider. See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for the full override reference.
 
 ### 3. Scan
 

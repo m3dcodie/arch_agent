@@ -167,8 +167,8 @@ class GitHubModelsProvider(LLMProvider):
         **kwargs,
     ):
         self.model = model or os.getenv("GITHUB_MODELS_MODEL", self.DEFAULT_MODEL)
-        self.temperature = float(os.getenv("GITHUB_MODELS_TEMPERATURE", "0.1"))
-        self.max_tokens = int(os.getenv("GITHUB_MODELS_MAX_TOKENS", "4096"))
+        self.temperature = float(os.getenv("GITHUB_MODELS_TEMPERATURE", os.getenv("LLM_TEMPERATURE", "0")))
+        self.max_tokens = int(os.getenv("GITHUB_MODELS_MAX_TOKENS", os.getenv("LLM_MAX_TOKENS", "4096")))
         self.extra_kwargs = kwargs
 
         self._token: str = token or _resolve_token()
