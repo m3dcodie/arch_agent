@@ -189,7 +189,13 @@ def invoke_structured(
             if parsed is not None:
                 raw_msg = raw_result.get("raw")
                 usage: dict = getattr(raw_msg, "usage_metadata", None) or {}
-                response_text: str | None = getattr(raw_msg, "content", None)
+                # When function calling is used the model response payload sits
+                # in tool_calls, leaving raw_msg.content as "" (empty string).
+                # Fall back to the serialised Pydantic output so the local
+                # tokenizer can estimate response tokens instead of logging N/A.
+                response_text: str | None = getattr(raw_msg, "content", None) or None
+                if not response_text and hasattr(parsed, "model_dump"):
+                    response_text = json.dumps(parsed.model_dump())
                 log_llm_cost(
                     llm, usage, agent_role,
                     prompt_text=prompt_text, response_text=response_text,

@@ -226,6 +226,33 @@ def estimate_cost(
     return round(input_cost + output_cost, 8)
 
 
+def _estimate_cost_breakdown(
+    provider: str,
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+) -> tuple[Optional[float], Optional[float]]:
+    """Return ``(input_usd, output_usd)`` separately, or ``(None, None)`` when
+    the model is not in the pricing table.  Ollama returns ``(0.0, 0.0)``.
+
+    Input and output tokens are priced at different rates per million —
+    output tokens are typically 3–5× more expensive than input tokens.
+    This breakdown makes that difference visible in logs and audit events.
+    """
+    if provider == "ollama":
+        return (0.0, 0.0)
+
+    normalised = _normalise_model_id(model)
+    pricing = _PRICING.get(normalised)
+    if pricing is None:
+        return (None, None)
+
+    return (
+        round((input_tokens / 1_000_000) * pricing[0], 8),
+        round((output_tokens / 1_000_000) * pricing[1], 8),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Cost comparison logger
 # ---------------------------------------------------------------------------
@@ -324,13 +351,20 @@ def log_llm_cost(
     provider = get_provider_name(llm)
     model = get_model_name(llm)
     cost = estimate_cost(provider, model, input_tokens, output_tokens)
+    input_cost, output_cost = _estimate_cost_breakdown(provider, model, input_tokens, output_tokens)
 
     if cost is None:
         cost_str = "N/A (model not in pricing table)"
+        input_cost_str = "N/A"
+        output_cost_str = "N/A"
     elif provider == "github-copilot":
         cost_str = f"${cost:.6f} (list price)"
+        input_cost_str = f"${input_cost:.6f} (list price)"
+        output_cost_str = f"${output_cost:.6f} (list price)"
     else:
         cost_str = f"${cost:.6f}"
+        input_cost_str = f"${input_cost:.6f}"
+        output_cost_str = f"${output_cost:.6f}"
 
     local_prompt: Optional[int] = (
         _count_local_tokens(prompt_text, model) if prompt_text else None
@@ -344,7 +378,8 @@ def log_llm_cost(
     logger.info(
         "[COST] provider=%s model=%s agent=%s "
         "input_tokens=%d output_tokens=%d total_tokens=%d "
-        "estimated_cost_usd=%s local_prompt_tokens=%s local_response_tokens=%s"
+        "input_cost_usd=%s output_cost_usd=%s estimated_cost_usd=%s "
+        "local_prompt_tokens=%s local_response_tokens=%s"
         "%s",
         provider,
         model,
@@ -352,6 +387,8 @@ def log_llm_cost(
         input_tokens,
         output_tokens,
         total_tokens,
+        input_cost_str,
+        output_cost_str,
         cost_str,
         local_prompt_str,
         local_response_str,
@@ -370,6 +407,8 @@ def log_llm_cost(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             total_tokens=total_tokens,
+            input_cost_usd=input_cost,
+            output_cost_usd=output_cost,
             cost_usd=cost,
             cost_label=cost_str,
             local_prompt_tokens=local_prompt,
