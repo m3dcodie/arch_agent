@@ -7,16 +7,19 @@ ADAG without separate cloud credentials.
 
 Authentication
 --------------
-The OAuth token from ``gh auth login`` is used directly as the Bearer token
-against ``api.githubcopilot.com`` — no internal token exchange is required.
+The GitHub OAuth token (``gho_…``) is used directly as the Bearer token
+against ``api.githubcopilot.com``.  The token **must** have the ``copilot``
+OAuth scope — grant it with::
 
-Two token sources are supported, tried in priority order:
+    gh auth login --scopes 'copilot'
 
-1. ``GITHUB_COPILOT_TOKEN`` env var — set this to the output of::
+Token sources (tried in priority order):
+
+1. ``GITHUB_COPILOT_TOKEN`` env var — set to the output of::
 
        gh auth status --show-token
 
-2. ``~/.config/gh/hosts.yml`` — written by the ``gh`` CLI automatically.
+2. ``~/.config/gh/hosts.yml`` — written by ``gh auth login`` automatically.
 
 Endpoint and models
 -------------------
@@ -122,17 +125,44 @@ def _resolve_oauth_token() -> str:
 
 
 # ---------------------------------------------------------------------------
-# Helper: validate the token works against the Copilot API
+# Helper: validate the token scope and Copilot API access
 # ---------------------------------------------------------------------------
 
 
 def _validate_token(token: str) -> None:
     """
-    Hit the /models endpoint to confirm the token is accepted.
+    Check the token has the ``copilot`` scope and that the Copilot API accepts it.
+
+    Uses the GitHub meta API to inspect scopes (avoids consuming quota) then
+    confirms the Copilot /models endpoint is reachable.
 
     Raises:
-        ValueError: On auth failure or connectivity error.
+        ValueError: On missing scope, auth failure, or connectivity error.
     """
+    # Step 1: check scopes via GitHub API (cheap — no LLM quota used).
+    try:
+        scope_resp = requests.get(
+            "https://api.github.com/",
+            headers={"Authorization": f"token {token}", "Accept": "application/json"},
+            timeout=10,
+        )
+        granted_scopes = [
+            s.strip()
+            for s in scope_resp.headers.get("X-OAuth-Scopes", "").split(",")
+            if s.strip()
+        ]
+        if scope_resp.ok and granted_scopes and "copilot" not in granted_scopes:
+            raise ValueError(
+                "GitHub token is missing the 'copilot' OAuth scope.\n"
+                "Re-authenticate with the required scope:\n"
+                "  gh auth login --scopes 'copilot'\n"
+                "  gh auth status --show-token\n"
+                "Then update GITHUB_COPILOT_TOKEN in your .env"
+            )
+    except requests.exceptions.RequestException:
+        pass  # offline / firewall — skip scope check, let /models validate
+
+    # Step 2: confirm the Copilot chat API accepts the token.
     headers = {
         "Authorization": f"Bearer {token}",
         "Accept": "application/json",
@@ -145,6 +175,14 @@ def _validate_token(token: str) -> None:
                 "GitHub Copilot token is invalid or expired.\n"
                 "Run: gh auth login --scopes 'copilot' && gh auth status --show-token\n"
                 "Then update GITHUB_COPILOT_TOKEN in your .env"
+            )
+        if resp.status_code == 403:
+            raise ValueError(
+                "GitHub Copilot API access denied (HTTP 403).\n"
+                "Ensure:\n"
+                "  1. Your token has the 'copilot' scope:  gh auth login --scopes 'copilot'\n"
+                "  2. Your account has an active Copilot Individual/Business/Enterprise plan.\n"
+                "  3. Your organisation policy allows API access."
             )
         resp.raise_for_status()
     except requests.exceptions.RequestException as exc:
@@ -161,7 +199,7 @@ class GitHubCopilotProvider(LLMProvider):
     GitHub Copilot LLM provider.
 
     Uses the OAuth token directly as a Bearer token against the Copilot API
-    (OpenAI-compatible). No internal token exchange required.
+    (OpenAI-compatible).  The token must have the ``copilot`` OAuth scope.
     """
 
     DEFAULT_MODEL = "claude-sonnet-4.5"
@@ -173,11 +211,11 @@ class GitHubCopilotProvider(LLMProvider):
         **kwargs,
     ):
         self.model = model or os.getenv("GITHUB_COPILOT_MODEL", self.DEFAULT_MODEL)
-        self.temperature = float(os.getenv("GITHUB_COPILOT_TEMPERATURE", "0.1"))
-        self.max_tokens = int(os.getenv("GITHUB_COPILOT_MAX_TOKENS", "4096"))
+        self.temperature = float(os.getenv("GITHUB_COPILOT_TEMPERATURE", os.getenv("LLM_TEMPERATURE", "0")))
+        self.max_tokens = int(os.getenv("GITHUB_COPILOT_MAX_TOKENS", os.getenv("LLM_MAX_TOKENS", "4096")))
         self.extra_kwargs = kwargs
 
-        # Resolve token eagerly — fail fast on misconfiguration
+        # Resolve token eagerly — fail fast on misconfiguration.
         self._token: str = oauth_token or _resolve_oauth_token()
 
         self.validate_config()
@@ -194,13 +232,11 @@ class GitHubCopilotProvider(LLMProvider):
         INTAKE_MODEL / AUDITOR_MODEL env vars are set) overrides the provider
         default, enabling per-agent model selection.
         """
-        # Required Copilot headers — caller headers are merged in but cannot
-        # override the required ones.
         caller_headers = kwargs.pop("default_headers", {})
         merged_headers = {**_REQUIRED_HEADERS, **caller_headers}
 
         config = {
-            "model": self.model,  # overridden by model= kwarg below if set
+            "model": self.model,
             "openai_api_key": self._token,
             "openai_api_base": COPILOT_BASE_URL,
             "temperature": self.temperature,
@@ -217,10 +253,11 @@ class GitHubCopilotProvider(LLMProvider):
 
     def validate_config(self) -> bool:
         """
-        Validate the token against the Copilot API.
+        Validate that the token has the required scope and the API is reachable.
 
         Raises:
-            ValueError: If the token is missing or rejected.
+            ValueError: If the token is missing, lacks the copilot scope, or
+                        the API rejects it.
         """
         _validate_token(self._token)
         return True
@@ -231,3 +268,4 @@ class GitHubCopilotProvider(LLMProvider):
 # ---------------------------------------------------------------------------
 
 LLMFactory.register_provider("github-copilot", GitHubCopilotProvider)
+

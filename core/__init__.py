@@ -33,6 +33,14 @@ try:
 except ImportError:
     GITHUB_COPILOT_AVAILABLE = False
 
+# Import GitHub Models provider
+try:
+    from core.github_models_provider import GitHubModelsProvider  # noqa: F401
+
+    GITHUB_MODELS_AVAILABLE = True
+except ImportError:
+    GITHUB_MODELS_AVAILABLE = False
+
 # Import RAG provider (Phase 2)
 try:
     from core.rag_provider import RAGFactory
@@ -47,4 +55,5 @@ __all__ = [
     "RAGFactory",
     "RAG_AVAILABLE",
     "GITHUB_COPILOT_AVAILABLE",
+    "GITHUB_MODELS_AVAILABLE",
 ]

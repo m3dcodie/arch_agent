@@ -113,33 +113,58 @@ class ADAGRunner:
             List of AuditResult objects, one per .tf file scanned.
         """
         from models.violations import AuditResult, AuditStatus
+        from core.audit_logger import audit_trace, AuditSpan, audit_event
 
         graph = self._get_graph()
         tf_files = self._get_tf_files()
         results = []
 
-        for tf_file in tf_files:
-            logger.info(f"Scanning: {tf_file}")
-            try:
-                iac_code = tf_file.read_text(encoding="utf-8")
-                raw = graph.invoke(iac_code=iac_code, file_path=str(tf_file))
-                result = AuditResult(
-                    status=raw.get("status", AuditStatus.ERROR),
-                    file_path=raw.get("file_path", str(tf_file)),
-                    total_resources=len(raw.get("parsed_resources", [])),
-                    violations=raw.get("violations", []),
-                    summary=self._build_summary(raw),
-                )
-            except Exception as e:
-                logger.error(f"Error scanning {tf_file}: {e}")
-                result = AuditResult(
-                    status=AuditStatus.ERROR,
-                    file_path=str(tf_file),
-                    total_resources=0,
-                    violations=[],
-                    summary=f"Scan failed: {e}",
-                )
-            results.append(result)
+        with audit_trace() as trace_id:
+            audit_event(
+                "audit.run.start",
+                files=len(tf_files),
+                llm_provider=self.llm_provider or os.getenv("LLM_PROVIDER", "bedrock"),
+                rag=os.getenv("USE_RAG", "false"),
+            )
+
+            total_violations = 0
+            for tf_file in tf_files:
+                logger.info(f"Scanning: {tf_file}")
+                with AuditSpan("file.scan", file=str(tf_file)) as span:
+                    try:
+                        iac_code = tf_file.read_text(encoding="utf-8")
+                        raw = graph.invoke(iac_code=iac_code, file_path=str(tf_file))
+                        result = AuditResult(
+                            status=raw.get("status", AuditStatus.ERROR),
+                            file_path=raw.get("file_path", str(tf_file)),
+                            total_resources=len(raw.get("parsed_resources", [])),
+                            violations=raw.get("violations", []),
+                            summary=self._build_summary(raw),
+                        )
+                        n_violations = len(result.violations)
+                        total_violations += n_violations
+                        span.set(
+                            status=result.status.value,
+                            resources=result.total_resources,
+                            violations=n_violations,
+                        )
+                    except Exception as e:
+                        logger.error(f"Error scanning {tf_file}: {e}")
+                        result = AuditResult(
+                            status=AuditStatus.ERROR,
+                            file_path=str(tf_file),
+                            total_resources=0,
+                            violations=[],
+                            summary=f"Scan failed: {e}",
+                        )
+                        span.set(status="error", error=str(e))
+                results.append(result)
+
+            audit_event(
+                "audit.run.complete",
+                files_scanned=len(tf_files),
+                total_violations=total_violations,
+            )
 
         return results
 

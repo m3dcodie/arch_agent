@@ -8,6 +8,7 @@ Usage:
     adag scan ./infra/ --format sarif > results.sarif.json
 """
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -16,6 +17,12 @@ import click
 from dotenv import load_dotenv, find_dotenv
 
 load_dotenv(find_dotenv(usecwd=True))
+
+# Configure structured logging once at import time.
+# LOG_LEVEL=INFO  → show timing, cost, and agent events (default: WARNING)
+# LOG_FORMAT=json → machine-readable JSON lines (default: text)
+from core.logging_config import configure_logging  # noqa: E402
+configure_logging()
 
 
 @click.group()

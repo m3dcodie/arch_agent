@@ -501,8 +501,12 @@ class TestLLMUtils:
 
         mock_llm = MagicMock()
         expected = ViolationList(violations=[])
-        # with_structured_output must return a Runnable so `prompt | chain` works
-        mock_llm.with_structured_output.return_value = RunnableLambda(lambda _: expected)
+        # with_structured_output(include_raw=True) must return a Runnable that
+        # yields {"raw": AIMessage, "parsed": T, "parsing_error": None}.
+        raw_msg = AIMessage(content="")
+        mock_llm.with_structured_output.return_value = RunnableLambda(
+            lambda _: {"raw": raw_msg, "parsed": expected, "parsing_error": None}
+        )
 
         prompt = ChatPromptTemplate.from_template("{resources_json}")
         result = invoke_structured(mock_llm, prompt, {"resources_json": "[]"}, ViolationList)
@@ -523,7 +527,7 @@ class TestLLMUtils:
         # Patch _plain_invoke directly — the plain invocation path is tested separately;
         # here we only verify that a non-rate-limit structured-output failure causes
         # the caller to receive the result from _plain_invoke.
-        with patch("core.llm_utils._plain_invoke", return_value=expected) as mock_plain:
+        with patch("core.llm_utils._plain_invoke", return_value=(expected, {}, "{}")) as mock_plain:
             result = invoke_structured(mock_llm, prompt, {"resources_json": "[]"}, ViolationList)
 
         assert result is expected

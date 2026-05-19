@@ -37,6 +37,13 @@ class BedrockProvider(LLMProvider):
         )
         self.region = region or os.getenv("AWS_REGION", "us-east-1")
         self.profile_name = profile_name or os.getenv("AWS_PROFILE", "default")
+        # Auditor task is deterministic classification — temperature=0 prevents
+        # random pass/fail flips and JSON corruption.
+        # Override globally via LLM_TEMPERATURE, or per-provider via BEDROCK_TEMPERATURE.
+        self.temperature = float(os.getenv("BEDROCK_TEMPERATURE", os.getenv("LLM_TEMPERATURE", "0")))
+        # Max output tokens — caps response length and prevents runaway generation.
+        # Override globally via LLM_MAX_TOKENS, or per-provider via BEDROCK_MAX_TOKENS.
+        self.max_tokens = int(os.getenv("BEDROCK_MAX_TOKENS", os.getenv("LLM_MAX_TOKENS", "4096")))
         self.extra_config = kwargs
 
         # Validate configuration on initialization
@@ -67,6 +74,8 @@ class BedrockProvider(LLMProvider):
             "model_id": model_id,
             "region_name": self.region,
             "client": client,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
             **self.extra_config,
             **kwargs,
         }

@@ -31,15 +31,19 @@ class OllamaProvider(LLMProvider):
         self.model = model or os.getenv("OLLAMA_MODEL", "deepseek-r1:8b")
         self.base_url = base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
-        # -1 = unlimited tokens (correct for local models — no cost concern).
-        # reasoning=False disables the internal reasoning chain on qwen3/deepseek-r1
-        # thinking models — without this they spend minutes generating <think> blocks
-        # before producing any output, which looks like a hang.
+        # temperature=0 forces greedy decoding — the auditor is a deterministic
+        # compliance checker; randomness causes inconsistent pass/fail results.
+        # format="json" enables grammar-constrained decoding (GBNF) at the model
+        # kernel level — stronger than prompt instructions and critical for Ollama
+        # because most local models don't support function calling and fall back to
+        # the plain-invoke path where valid JSON is not guaranteed otherwise.
         # OLLAMA_TIMEOUT is a safety net in case the model hangs completely.
         defaults = {
             "num_predict": int(os.getenv("OLLAMA_NUM_PREDICT", "-1")),
             "timeout": int(os.getenv("OLLAMA_TIMEOUT", "300")),
             "reasoning": os.getenv("OLLAMA_THINK", "false").lower() == "true",
+            "temperature": float(os.getenv("OLLAMA_TEMPERATURE", os.getenv("LLM_TEMPERATURE", "0"))),
+            "format": "json",
         }
         # Caller kwargs override defaults
         defaults.update(kwargs)

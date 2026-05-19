@@ -25,8 +25,8 @@ class HuggingFaceProvider(LLMProvider):
         self.model = model or os.getenv("HF_MODEL", self.DEFAULT_MODEL)
         self.api_key = api_key or os.getenv("HF_TOKEN", "")
         self.base_url = os.getenv("HF_ROUTER_BASE_URL", "https://router.huggingface.co/v1")
-        self.temperature = float(os.getenv("HF_TEMPERATURE", "0.1"))
-        self.max_tokens = int(os.getenv("HF_MAX_TOKENS", "2048"))
+        self.temperature = float(os.getenv("HF_TEMPERATURE", os.getenv("LLM_TEMPERATURE", "0")))
+        self.max_tokens = int(os.getenv("HF_MAX_TOKENS", os.getenv("LLM_MAX_TOKENS", "4096")))
         self.extra_kwargs = kwargs
         self.validate_config()
 
