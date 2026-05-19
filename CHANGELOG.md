@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/) and this
 project follows Semantic Versioning (https://semver.org/).
 
+## [1.2.0] - 2026-05-19
+
+### Added
+
+- **Unified sampling parameters** — `LLM_TEMPERATURE` and `LLM_MAX_TOKENS` now apply across all providers (Bedrock, GitHub Copilot, GitHub Models, HuggingFace, Ollama) from a single env var; provider-specific vars (`BEDROCK_TEMPERATURE`, `HF_MAX_TOKENS`, etc.) remain supported as per-provider overrides with the same fallback chain
+- **Grammar-constrained JSON decoding for Ollama** — `format="json"` added to `OllamaProvider`, enabling GBNF grammar enforcement at the model kernel level; prevents invalid JSON on the plain-invoke fallback path where local models do not support function calling
+- **Input/output cost breakdown in logs** — `[COST]` log lines and `llm.invoke` audit events now emit `input_cost_usd` and `output_cost_usd` separately in addition to `estimated_cost_usd`; makes the 3–5× price difference between input and output tokens visible per call
+- **`_estimate_cost_breakdown()` helper** in `core/cost_tracker.py` — returns `(input_usd, output_usd)` tuple using the correct per-million rate for each token direction
+- **`local_response_tokens` fix** — when `with_structured_output` (function calling) succeeds, `raw_msg.content` is `""` (response payload is in `tool_calls`); the local tokenizer now falls back to the serialised Pydantic result JSON so `local_response_tokens` is populated instead of logging `N/A`
+- **Sampling parameters section in README** — documents `LLM_TEMPERATURE` and `LLM_MAX_TOKENS`, explains why `temperature=0` is mandatory for deterministic compliance checking, and explicitly states that `top_k` and `top_p` are irrelevant at temperature 0
+
+### Changed
+
+- **`temperature` default set to `0` on all providers** — Bedrock and Ollama previously used framework defaults (~1.0 and 0.8 respectively), causing non-deterministic audit results; GitHub Copilot and HuggingFace defaults lowered from `0.1` to `0`
+- **`max_tokens` default unified to `4096`** — HuggingFace default raised from `2048`; Bedrock now sets `max_tokens` explicitly (was unset); all providers fall back to `LLM_MAX_TOKENS`
+- **`BEDROCK_TEMPERATURE` and `BEDROCK_MAX_TOKENS`** added to `BedrockProvider` — Bedrock previously had no temperature or max_tokens control at all
+- **`OLLAMA_TEMPERATURE`** added to `OllamaProvider` with fallback to `LLM_TEMPERATURE`
+- **`.env.example`** — replaced provider-specific temperature/max_tokens vars with `LLM_TEMPERATURE=0` and `LLM_MAX_TOKENS=4096` as the single source of truth; provider-specific overrides documented as comments
+- **`docs/CONFIGURATION.md`** — Core table updated with `LLM_TEMPERATURE` and `LLM_MAX_TOKENS`; all provider tables updated with temperature and max_tokens columns and "Keep at 0" guidance
+- **`github_models_provider.py`** temperature default corrected from `0.1` to `0` (consistent with other providers)
+
+---
+
 ## [1.1.1] - 2026-05-05
 
 ### Changed
