@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/) and this
 project follows Semantic Versioning (https://semver.org/).
 
+## [1.2.1] - 2026-05-20
+
+### Added
+
+- **`benchmarks/` folder** — model evaluation results for the auditor against the built-in 7-fixture test suite; each run produces a `.json` (machine-readable) and `.md` (human-readable) report tracking Recall, Precision, F1, Accuracy, latency, and estimated cost per model; first entries cover Claude Haiku 4.5 and Gemini 2.5 Pro (both via GitHub Copilot, both scoring 100% on all metrics)
+- **Benchmarks section in README** — documents the `benchmarks/` folder structure, explains each metric, and includes a summary table of results to date
+
+### Removed
+
+- **`FALLBACK_AUDITOR_PROMPT`** removed from `agents/prompts.py` — the hardcoded deletion-protection-only prompt was a silent degradation path: when no policies were found, audits appeared to succeed but were checked against a single hardcoded rule instead of the repository's actual policy set
+
+### Changed
+
+- **Auditor now errors on missing policies** (`agents/auditor.py`) — when `retrieved_policies` is empty and resources are present, the auditor returns `AuditStatus.ERROR` with a clear message instead of silently falling back to the removed hardcoded prompt; auditing without explicit policies is no longer permitted
+- **Policy analyst now errors on empty disk load** (`agents/policy_analyst.py`) — in both offline mode and the RAG empty-chunks fallback path, if `load_policies_from_dir` returns zero policies the node returns `AuditStatus.ERROR` immediately rather than propagating an empty list downstream; operators get an actionable error at the source instead of a silent no-op audit
+
+---
+
 ## [1.2.0] - 2026-05-19
 
 ### Added
@@ -40,7 +58,7 @@ project follows Semantic Versioning (https://semver.org/).
 
 ### Added
 
-- **Prompt Contract compliance** — both `FALLBACK_AUDITOR_PROMPT` and `build_dynamic_prompt()` in `agents/prompts.py` are now structured using the 5-layer [Prompt Contract](https://github.com/m3dcodie/prompt-contract/) architecture in cache-friendly order: `ROLE_IDENTITY` → `ROLE_AUTHORITY` → `LANGUAGE_FORMAT` → `LANGUAGE_TONE` → `SCOPE_CONTEXT` → `SCOPE_CONSTRAINTS` → `SCOPE_KNOWLEDGE` → `REASONING_STEPS` → `REASONING_REVIEW` → `OBJECTIVE_TASK` → `OBJECTIVE_ANTI_GOALS`
+- **Prompt Contract compliance** — `build_dynamic_prompt()` in `agents/prompts.py` is now structured using the 5-layer [Prompt Contract](https://github.com/m3dcodie/prompt-contract/) architecture in cache-friendly order: `ROLE_IDENTITY` → `ROLE_AUTHORITY` → `LANGUAGE_FORMAT` → `LANGUAGE_TONE` → `SCOPE_CONTEXT` → `SCOPE_CONSTRAINTS` → `SCOPE_KNOWLEDGE` → `REASONING_STEPS` → `REASONING_REVIEW` → `OBJECTIVE_TASK` → `OBJECTIVE_ANTI_GOALS`
 - **`REASONING_STEPS` chain-of-thought** — auditor now enumerates resources, classifies by policy applicability, validates each attribute, and compiles violations in explicit ordered steps before output
 - **`REASONING_REVIEW` self-audit gate** — auditor verifies each flagged resource before returning, reducing false positives
 - **`agents/prompts.py`** extracted as a dedicated module — all LLM prompt text centralised so prompt engineering changes never require touching agent logic

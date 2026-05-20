@@ -20,6 +20,7 @@ Built to explore and demonstrate: **LangGraph** · **Multi-Agent Systems** · **
 - RAG Mode
 - MCP Server
 - Running Tests
+- Benchmarks
 - Documentation
 - License
 
@@ -345,6 +346,40 @@ pytest
 # With coverage
 pytest --cov=adag --cov=agents --cov=core --cov=models --cov-report=term-missing
 ```
+
+---
+
+## Benchmarks
+
+The `benchmarks/` folder contains model evaluation results measuring how accurately different LLMs detect real violations across the built-in test suite.
+
+```
+benchmarks/
+├── benchmark_20260520_055533.json   ← raw results (Claude Haiku 4.5 via Copilot)
+├── benchmark_20260520_055533.md     ← human-readable report
+├── benchmark_20260520_055829.json   ← raw results (Gemini 2.5 Pro via Copilot)
+└── benchmark_20260520_055829.md     ← human-readable report
+```
+
+Each run tests the auditor against 7 Terraform fixtures (5 expected FAIL, 2 expected PASS) and reports:
+
+| Metric        | What it measures                                                    |
+| ------------- | ------------------------------------------------------------------- |
+| **Recall**    | % of real violations caught — target ≥ 95% for compliance tooling  |
+| **Precision** | % of flagged violations that are genuine (not false positives)      |
+| **F1**        | Harmonic mean of recall and precision                               |
+| **Accuracy**  | Overall correct classifications (TP + TN) / total                  |
+| **Avg Latency** | Mean response time per scan                                       |
+| **Est. Cost** | Reference cost at published per-token list prices                   |
+
+Results to date:
+
+| Model | Recall | Precision | F1 | Avg Latency |
+|-------|--------|-----------|----|-------------|
+| Claude Haiku 4.5 (Copilot) | 100% | 100% | 100% | 6.05s |
+| Gemini 2.5 Pro (Copilot) | 100% | 100% | 100% | 12.12s |
+
+Both models achieve perfect scores on the current 7-fixture suite. The JSON files are machine-readable for tracking regressions across model versions over time.
 
 ---
 

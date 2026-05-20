@@ -1,0 +1,255 @@
+{
+  "timestamp": "20260520_055829",
+  "results": [
+    {
+      "model_id": "gemini-2.5-pro-copilot",
+      "model_display_name": "Gemini 2.5 Pro (Copilot)",
+      "pricing": {
+        "tier": "Powerful",
+        "included": false,
+        "input_usd_per_1m": 1.25,
+        "output_usd_per_1m": 10.0
+      },
+      "metrics": {
+        "tp": 5,
+        "fp": 0,
+        "fn": 0,
+        "tn": 2,
+        "errors": 0,
+        "recall": 1.0,
+        "precision": 1.0,
+        "f1": 1.0,
+        "accuracy": 1.0,
+        "avg_latency_s": 12.12,
+        "total_cost_usd": null,
+        "total_input_tokens": 34955,
+        "total_output_tokens": 547
+      },
+      "evaluations": [
+        {
+          "test_case": "iam_wildcard_resource",
+          "expected_outcome": "fail",
+          "expected_violations": [
+            {
+              "policy_ref": "iam_least_privilege",
+              "resource_type": "aws_iam_role_policy",
+              "resource_name": "app-service-policy",
+              "note": "Statement grants Action=s3:* on Resource=* (wildcard resource is forbidden)"
+            }
+          ],
+          "result": {
+            "scan_error": false,
+            "actual_status": "failed",
+            "actual_violation_count": 1,
+            "actual_policy_refs": [
+              "iam_least_privilege"
+            ],
+            "policy_hits": [
+              "iam_least_privilege"
+            ],
+            "policy_misses": [],
+            "false_positives": [],
+            "classification": "TP",
+            "correct": true
+          },
+          "elapsed_s": 12.44,
+          "cost": {
+            "input_tokens": 5008,
+            "output_tokens": 103,
+            "estimated_usd": null,
+            "agent_calls": 1,
+            "auditor_model_used": "gemini-2.5-pro"
+          }
+        },
+        {
+          "test_case": "rds_compliant",
+          "expected_outcome": "pass",
+          "expected_violations": [],
+          "result": {
+            "scan_error": false,
+            "actual_status": "passed",
+            "actual_violation_count": 0,
+            "actual_policy_refs": [],
+            "policy_hits": [],
+            "policy_misses": [],
+            "false_positives": [],
+            "classification": "TN",
+            "correct": true
+          },
+          "elapsed_s": 11.76,
+          "cost": {
+            "input_tokens": 5111,
+            "output_tokens": 3,
+            "estimated_usd": null,
+            "agent_calls": 1,
+            "auditor_model_used": "gemini-2.5-pro"
+          }
+        },
+        {
+          "test_case": "rds_no_deletion_protection",
+          "expected_outcome": "fail",
+          "expected_violations": [
+            {
+              "policy_ref": "delete_protection",
+              "resource_type": "aws_db_instance",
+              "resource_name": "prod-api-db-primary",
+              "note": "deletion_protection attribute is false"
+            }
+          ],
+          "result": {
+            "scan_error": false,
+            "actual_status": "failed",
+            "actual_violation_count": 1,
+            "actual_policy_refs": [
+              "delete_protection"
+            ],
+            "policy_hits": [
+              "delete_protection"
+            ],
+            "policy_misses": [],
+            "false_positives": [],
+            "classification": "TP",
+            "correct": true
+          },
+          "elapsed_s": 11.29,
+          "cost": {
+            "input_tokens": 4922,
+            "output_tokens": 98,
+            "estimated_usd": null,
+            "agent_calls": 1,
+            "auditor_model_used": "gemini-2.5-pro"
+          }
+        },
+        {
+          "test_case": "rds_public_access",
+          "expected_outcome": "fail",
+          "expected_violations": [
+            {
+              "policy_ref": "public_access_block",
+              "resource_type": "aws_db_instance",
+              "resource_name": "prod-api-db-primary",
+              "note": "publicly_accessible is true"
+            }
+          ],
+          "result": {
+            "scan_error": false,
+            "actual_status": "failed",
+            "actual_violation_count": 1,
+            "actual_policy_refs": [
+              "public_access_block"
+            ],
+            "policy_hits": [
+              "public_access_block"
+            ],
+            "policy_misses": [],
+            "false_positives": [],
+            "classification": "TP",
+            "correct": true
+          },
+          "elapsed_s": 12.47,
+          "cost": {
+            "input_tokens": 4922,
+            "output_tokens": 115,
+            "estimated_usd": null,
+            "agent_calls": 1,
+            "auditor_model_used": "gemini-2.5-pro"
+          }
+        },
+        {
+          "test_case": "s3_compliant",
+          "expected_outcome": "pass",
+          "expected_violations": [],
+          "result": {
+            "scan_error": false,
+            "actual_status": "passed",
+            "actual_violation_count": 0,
+            "actual_policy_refs": [],
+            "policy_hits": [],
+            "policy_misses": [],
+            "false_positives": [],
+            "classification": "TN",
+            "correct": true
+          },
+          "elapsed_s": 11.55,
+          "cost": {
+            "input_tokens": 5199,
+            "output_tokens": 3,
+            "estimated_usd": null,
+            "agent_calls": 1,
+            "auditor_model_used": "gemini-2.5-pro"
+          }
+        },
+        {
+          "test_case": "s3_no_encryption",
+          "expected_outcome": "fail",
+          "expected_violations": [
+            {
+              "policy_ref": "encryption_at_rest",
+              "resource_type": "aws_s3_bucket",
+              "resource_name": "app-data-store",
+              "note": "no aws_s3_bucket_server_side_encryption_configuration resource present"
+            }
+          ],
+          "result": {
+            "scan_error": false,
+            "actual_status": "failed",
+            "actual_violation_count": 1,
+            "actual_policy_refs": [
+              "encryption_at_rest"
+            ],
+            "policy_hits": [
+              "encryption_at_rest"
+            ],
+            "policy_misses": [],
+            "false_positives": [],
+            "classification": "TP",
+            "correct": true
+          },
+          "elapsed_s": 11.43,
+          "cost": {
+            "input_tokens": 4918,
+            "output_tokens": 105,
+            "estimated_usd": null,
+            "agent_calls": 1,
+            "auditor_model_used": "gemini-2.5-pro"
+          }
+        },
+        {
+          "test_case": "sg_ssh_open_world",
+          "expected_outcome": "fail",
+          "expected_violations": [
+            {
+              "policy_ref": "public_access_block",
+              "resource_type": "aws_security_group",
+              "resource_name": "app-server-sg",
+              "note": "ingress rule allows port 22 from cidr_blocks=[0.0.0.0/0]"
+            }
+          ],
+          "result": {
+            "scan_error": false,
+            "actual_status": "failed",
+            "actual_violation_count": 1,
+            "actual_policy_refs": [
+              "public_access_block"
+            ],
+            "policy_hits": [
+              "public_access_block"
+            ],
+            "policy_misses": [],
+            "false_positives": [],
+            "classification": "TP",
+            "correct": true
+          },
+          "elapsed_s": 13.88,
+          "cost": {
+            "input_tokens": 4875,
+            "output_tokens": 120,
+            "estimated_usd": null,
+            "agent_calls": 1,
+            "auditor_model_used": "gemini-2.5-pro"
+          }
+        }
+      ]
+    }
+  ]
+}

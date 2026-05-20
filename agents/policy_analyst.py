@@ -115,6 +115,15 @@ def policy_analyst_node(state: AgentState) -> Dict[str, Any]:
             # Respects POLICIES_DIR env var; falls back to built-in policies/ bundle.
             policies_dir = os.getenv("POLICIES_DIR")
             disk_policies = load_policies_from_dir(policies_dir)
+            if not disk_policies:
+                return {
+                    "retrieved_policies": [],
+                    "resource_types": resource_types,
+                    "current_node": "policy_analyst",
+                    "status": AuditStatus.ERROR,
+                    "error_message": "No policy files found. Add .md policy files to the policies/ directory or set POLICIES_DIR.",
+                    "messages": ["[POLICY_ANALYST] ERROR: No policies found on disk — cannot proceed."],
+                }
             return {
                 "retrieved_policies": [p.model_dump() for p in disk_policies],
                 "resource_types": resource_types,
@@ -151,11 +160,19 @@ def policy_analyst_node(state: AgentState) -> Dict[str, Any]:
                 "messages": ["[POLICY_ANALYST] ERROR: RAG API call failed — see server logs."],
             }
 
-        # If the service returns no chunks, fall back to disk so the auditor
-        # always has policies to work against.
+        # RAG returned no chunks — try disk as fallback; error if disk is also empty.
         if not chunks:
             policies_dir = os.getenv("POLICIES_DIR")
             disk_policies = load_policies_from_dir(policies_dir)
+            if not disk_policies:
+                return {
+                    "retrieved_policies": [],
+                    "resource_types": resource_types,
+                    "current_node": "policy_analyst",
+                    "status": AuditStatus.ERROR,
+                    "error_message": "RAG returned no chunks and no policy files found on disk. Add .md policy files to the policies/ directory.",
+                    "messages": ["[POLICY_ANALYST] ERROR: RAG returned no chunks and no disk policies — cannot proceed."],
+                }
             return {
                 "retrieved_policies": [p.model_dump() for p in disk_policies],
                 "resource_types": resource_types,

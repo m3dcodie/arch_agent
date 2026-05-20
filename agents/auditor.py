@@ -10,7 +10,7 @@ from typing import Dict, Any, List
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.language_models import BaseChatModel
 
-from agents.prompts import FALLBACK_AUDITOR_PROMPT, build_dynamic_prompt
+from agents.prompts import build_dynamic_prompt
 from core.state import AgentState
 from core.llm_utils import invoke_structured
 from models.violations import (
@@ -69,8 +69,7 @@ def auditor_node(state: AgentState, llm: BaseChatModel) -> Dict[str, Any]:
     """
     Audit parsed resources against retrieved policies.
 
-    Uses policies from the policy_analyst node when available; falls back to
-    a hardcoded deletion-protection check otherwise.
+    Errors out if no policies are available — auditing without policies is not permitted.
 
     Args:
         state: Current agent state.
@@ -93,16 +92,17 @@ def auditor_node(state: AgentState, llm: BaseChatModel) -> Dict[str, Any]:
 
         resources_json = _format_resources_for_prompt(parsed_resources)
 
-        if retrieved_policies:
-            prompt_text = build_dynamic_prompt(retrieved_policies)
-            message_prefix = (
-                f"[AUDITOR] Auditing against {len(retrieved_policies)} retrieved policies"
-            )
-        else:
-            prompt_text = FALLBACK_AUDITOR_PROMPT
-            message_prefix = (
-                "[AUDITOR] Using fallback policy (RAG disabled or no policies retrieved)"
-            )
+        if not retrieved_policies:
+            return {
+                "violations": [],
+                "current_node": "auditor",
+                "status": AuditStatus.ERROR,
+                "error_message": "No policies available — auditing requires explicit policies. Add policy files to the policies/ directory or configure RAG.",
+                "messages": ["[AUDITOR] ERROR: No policies retrieved — cannot audit without policies."],
+            }
+
+        prompt_text = build_dynamic_prompt(retrieved_policies)
+        message_prefix = f"[AUDITOR] Auditing against {len(retrieved_policies)} retrieved policies"
 
         prompt = ChatPromptTemplate.from_template(prompt_text)
         result = invoke_structured(

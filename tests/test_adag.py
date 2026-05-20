@@ -301,6 +301,16 @@ class TestAuditorAgent:
             ]
         )
 
+        _minimal_policy = {
+            "id": "deletion_protection",
+            "title": "Deletion Protection",
+            "severity": "HIGH",
+            "description": "DB instances must have deletion_protection = true",
+            "requirements": "deletion_protection must be true",
+            "scope": ["aws_db_instance"],
+            "remediation": "Set deletion_protection = true",
+        }
+
         state = {
             "iac_code": "",
             "file_path": "test.tf",
@@ -313,8 +323,8 @@ class TestAuditorAgent:
                     line_number=1,
                 )
             ],
-            "retrieved_policies": [],
-            "resource_types": [],
+            "retrieved_policies": [_minimal_policy],
+            "resource_types": ["aws_db_instance"],
             "violations": [],
             "status": AuditStatus.IN_PROGRESS,
             "current_node": "intake",
@@ -335,6 +345,16 @@ class TestAuditorAgent:
 
         mock_result = ViolationList(violations=[])
 
+        _minimal_policy = {
+            "id": "deletion_protection",
+            "title": "Deletion Protection",
+            "severity": "HIGH",
+            "description": "DB instances must have deletion_protection = true",
+            "requirements": "deletion_protection must be true",
+            "scope": ["aws_db_instance"],
+            "remediation": "Set deletion_protection = true",
+        }
+
         state = {
             "iac_code": "",
             "file_path": "test.tf",
@@ -347,8 +367,8 @@ class TestAuditorAgent:
                     line_number=1,
                 )
             ],
-            "retrieved_policies": [],
-            "resource_types": [],
+            "retrieved_policies": [_minimal_policy],
+            "resource_types": ["aws_db_instance"],
             "violations": [],
             "status": AuditStatus.IN_PROGRESS,
             "current_node": "intake",
@@ -361,6 +381,38 @@ class TestAuditorAgent:
         assert result["current_node"] == "auditor"
         assert result["status"] == AuditStatus.PASSED
         assert len(result["violations"]) == 0
+
+    def test_auditor_errors_when_no_policies(self, mock_llm):
+        """Auditor must error out when no policies are available — no fallback allowed."""
+        from agents.auditor import auditor_node
+
+        state = {
+            "iac_code": "",
+            "file_path": "test.tf",
+            "messages": [],
+            "parsed_resources": [
+                TerraformResource(
+                    resource_type="aws_db_instance",
+                    resource_name="main",
+                    attributes={"engine": "postgres"},
+                    line_number=1,
+                )
+            ],
+            "retrieved_policies": [],
+            "resource_types": ["aws_db_instance"],
+            "violations": [],
+            "status": AuditStatus.IN_PROGRESS,
+            "current_node": "intake",
+            "error_message": "",
+        }
+
+        result = auditor_node(state, mock_llm)
+
+        assert result["current_node"] == "auditor"
+        assert result["status"] == AuditStatus.ERROR
+        assert result["error_message"]
+        assert result["violations"] == []
+        mock_llm.invoke.assert_not_called()
 
     def test_auditor_no_resources(self, mock_llm):
         """Test auditor with no resources"""
