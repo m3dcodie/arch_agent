@@ -115,15 +115,29 @@ def policy_analyst_node(state: AgentState) -> Dict[str, Any]:
             # Respects POLICIES_DIR env var; falls back to built-in policies/ bundle.
             policies_dir = os.getenv("POLICIES_DIR")
             disk_policies = load_policies_from_dir(policies_dir)
+        if not disk_policies:
             return {
-                "retrieved_policies": [p.model_dump() for p in disk_policies],
+                "retrieved_policies": [],
                 "resource_types": resource_types,
                 "current_node": "policy_analyst",
+                "status": AuditStatus.ERROR,
+                "error_message": (
+                    "No policy files found. Add .md files to the policies/ directory "
+                    "(or set POLICIES_DIR) before running an audit."
+                ),
                 "messages": [
-                    f"[POLICY_ANALYST] RAG disabled — loaded {len(disk_policies)} policies from disk",
-                    f"[POLICY_ANALYST] Resource types: {', '.join(resource_types)}",
+                    "[POLICY_ANALYST] ERROR: No policies found on disk — cannot audit without policies.",
                 ],
             }
+        return {
+            "retrieved_policies": [p.model_dump() for p in disk_policies],
+            "resource_types": resource_types,
+            "current_node": "policy_analyst",
+            "messages": [
+                f"[POLICY_ANALYST] RAG disabled — loaded {len(disk_policies)} policies from disk",
+                f"[POLICY_ANALYST] Resource types: {', '.join(resource_types)}",
+            ],
+        }
 
         # RAG mode: build a semantic query and call the context augmentation service.
         query = " ".join([
@@ -151,19 +165,19 @@ def policy_analyst_node(state: AgentState) -> Dict[str, Any]:
                 "messages": ["[POLICY_ANALYST] ERROR: RAG API call failed — see server logs."],
             }
 
-        # If the service returns no chunks, fall back to disk so the auditor
-        # always has policies to work against.
+        # If the service returns no chunks, error out — do not silently fall back.
         if not chunks:
-            policies_dir = os.getenv("POLICIES_DIR")
-            disk_policies = load_policies_from_dir(policies_dir)
             return {
-                "retrieved_policies": [p.model_dump() for p in disk_policies],
+                "retrieved_policies": [],
                 "resource_types": resource_types,
                 "current_node": "policy_analyst",
+                "status": AuditStatus.ERROR,
+                "error_message": (
+                    "RAG returned no policies for these resource types. "
+                    "Ensure policies are indexed in the RAG pipeline before running an audit."
+                ),
                 "messages": [
-                    "[POLICY_ANALYST] RAG returned no chunks — falling back to disk policies",
-                    f"[POLICY_ANALYST] Loaded {len(disk_policies)} policies from disk",
-                    f"[POLICY_ANALYST] Resource types: {', '.join(resource_types)}",
+                    "[POLICY_ANALYST] ERROR: RAG returned no policies — cannot audit without policies.",
                 ],
             }
 

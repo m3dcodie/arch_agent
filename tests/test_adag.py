@@ -747,8 +747,8 @@ class TestPolicyAnalystAgent:
         # Scope must come from chunk metadata, NOT from state resource_types
         assert p["scope"] == ["aws_db_instance"]
 
-    def test_rag_mode_falls_back_to_disk_on_empty_chunks(self, monkeypatch):
-        """RAG mode falls back to disk policies when no chunks are returned."""
+    def test_rag_mode_errors_on_empty_chunks(self, monkeypatch):
+        """RAG mode errors when no chunks are returned — no silent disk fallback."""
         import agents.policy_analyst as pa
 
         monkeypatch.setenv("USE_RAG", "true")
@@ -757,9 +757,9 @@ class TestPolicyAnalystAgent:
         result = pa.policy_analyst_node(self._make_state())
 
         assert result["current_node"] == "policy_analyst"
-        # Should fall back to disk — built-in policies are non-empty
-        assert len(result["retrieved_policies"]) > 0
-        assert result.get("status") != AuditStatus.ERROR
+        assert result["retrieved_policies"] == []
+        assert result["status"] == AuditStatus.ERROR
+        assert "RAG" in result["error_message"]
 
     def test_rag_mode_returns_error_on_network_failure(self, monkeypatch):
         """A network failure in RAG mode returns ERROR without leaking exception details."""
@@ -792,7 +792,7 @@ class TestPolicyAnalystAgent:
             return []
 
         monkeypatch.setattr(pa, "_fetch_rag_chunks", fake_fetch)
-        # Trigger offline fallback (empty chunks) — we only care about the endpoint
+        # Empty chunks → ERROR state; we only care that the endpoint was checked
         pa.policy_analyst_node(self._make_state())
 
         assert "../evil" not in captured.get("endpoint", "")

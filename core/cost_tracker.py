@@ -88,12 +88,26 @@ _PRICING: dict[str, tuple[float, float]] = {
     # GitHub Copilot — subscription plan; entries below are the underlying
     # provider list prices shown as reference only (logged as "list price").
     # Model names are the short IDs used by the Copilot API.
+    # Pricing source: https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing
     # =========================================================================
-    "claude-opus-4.5":   (15.00, 75.00),  # Anthropic list price
+    # Anthropic
+    "claude-opus-4.5":   (15.00, 75.00),
+    "claude-sonnet-4.6": ( 3.00, 15.00),
     "claude-sonnet-4.5": ( 3.00, 15.00),
     "claude-sonnet-4":   ( 3.00, 15.00),
-    "claude-haiku-4.5":  ( 0.80,  4.00),
-    # gpt-4.1 / gpt-4o-mini already covered in the OpenAI section above.
+    "claude-haiku-4.5":  ( 1.00,  5.00),
+    # OpenAI  (gpt-4.1 / gpt-4o already covered in the OpenAI section above)
+    "gpt-5-mini":        ( 0.25,  2.00),
+    "raptor-mini":       ( 0.25,  2.00),
+    "gpt-5.4-mini":      ( 0.75,  4.50),
+    "gpt-5.2":           ( 1.75, 14.00),
+    "gpt-5.2-codex":     ( 1.75, 14.00),
+    "gpt-5.3-codex":     ( 1.75, 14.00),
+    "gpt-5.4":           ( 2.50, 15.00),
+    # Google Gemini
+    "gemini-3-flash":    ( 0.50,  3.00),
+    "gemini-2.5-pro":    ( 1.25, 10.00),
+    "gemini-3.1-pro":    ( 2.00, 12.00),
 
     # =========================================================================
     # HuggingFace Serverless Inference Router

@@ -44,6 +44,10 @@ class BedrockProvider(LLMProvider):
         # Max output tokens — caps response length and prevents runaway generation.
         # Override globally via LLM_MAX_TOKENS, or per-provider via BEDROCK_MAX_TOKENS.
         self.max_tokens = int(os.getenv("BEDROCK_MAX_TOKENS", os.getenv("LLM_MAX_TOKENS", "4096")))
+        # Prompt caching — enabled by default for Anthropic/Claude base model IDs.
+        # Adds anthropic_beta header so cache_control blocks in messages are honoured.
+        # Set BEDROCK_PROMPT_CACHE=false to disable (e.g. for models that don't support it).
+        self.prompt_cache = os.getenv("BEDROCK_PROMPT_CACHE", "true").lower() == "true"
         self.extra_config = kwargs
 
         # Validate configuration on initialization
@@ -96,6 +100,15 @@ class BedrockProvider(LLMProvider):
         elif "anthropic" in model_id or "claude" in model_id:
             # Base model IDs need provider specified
             config["provider"] = "anthropic"
+            # Enable prompt caching — requires anthropic_beta header on the request.
+            # cache_control blocks in SystemMessage content will then be honoured.
+            if self.prompt_cache:
+                model_kwargs = config.get("model_kwargs", {})
+                betas = list(model_kwargs.get("anthropic_beta", []))
+                if "prompt-caching-2024-07-31" not in betas:
+                    betas.append("prompt-caching-2024-07-31")
+                model_kwargs["anthropic_beta"] = betas
+                config["model_kwargs"] = model_kwargs
             print(f"[DEBUG] Using model: {model_id} with provider=anthropic")
         else:
             # For other models, let LangChain auto-detect
@@ -104,6 +117,19 @@ class BedrockProvider(LLMProvider):
         llm = ChatBedrock(**config)
 
         return llm
+
+    @property
+    def supports_prompt_cache(self) -> bool:
+        """True when prompt caching is enabled and the model is a base Anthropic/Claude ID.
+
+        Inference profiles (e.g. ``us.anthropic.claude-*``) use the Converse API
+        which has a different caching mechanism and is excluded here.
+        """
+        mid = self.model_id.lower()
+        is_anthropic = "anthropic" in mid or "claude" in mid
+        # Inference profiles have a two-character region prefix before the first dot
+        is_inference_profile = len(mid.split(".")[0]) == 2
+        return self.prompt_cache and is_anthropic and not is_inference_profile
 
     def get_provider_name(self) -> str:
         """Get the provider name"""

@@ -125,6 +125,7 @@ def invoke_structured(
     inputs: dict,
     schema: Type[T],
     agent_role: str = "unknown",
+    messages: "list | None" = None,
 ) -> T:
     """
     Invoke the LLM and parse the result into a Pydantic model.
@@ -151,6 +152,11 @@ def invoke_structured(
         schema:     Pydantic model class to deserialise the response into.
         agent_role: Name of the calling agent node used in cost log lines
                     (e.g. ``"auditor"``).  Defaults to ``"unknown"``.
+        messages:   Pre-built list of BaseMessage objects.  When provided,
+                    ``prompt`` and ``inputs`` are ignored and the messages are
+                    sent to the model as-is.  Used for the Anthropic prompt-
+                    caching path where ``cache_control`` blocks must be
+                    preserved in the SystemMessage content.
 
     Returns:
         An instance of ``schema`` populated from the LLM response.
@@ -158,18 +164,60 @@ def invoke_structured(
     Raises:
         The last exception encountered after all retries are exhausted.
     """
+    from langchain_core.runnables import RunnableLambda
+
     last_exc: Exception = RuntimeError("No attempts made")
 
-    # Render prompt text once so local tokenizer can count tokens without
-    # repeating the formatting work inside the retry loop.
-    try:
-        rendered_messages = prompt.format_messages(**inputs)
-        prompt_text: str | None = "\n".join(
-            m.content if isinstance(m.content, str) else str(m.content)
-            for m in rendered_messages
-        )
-    except Exception:
-        prompt_text = None
+    # When pre-built messages are provided, use them directly and bypass the
+    # ChatPromptTemplate.  Build a passthrough Runnable so the chain syntax
+    # (passthrough | llm) still works.
+    if messages is not None:
+        _messages = messages
+
+        def _passthrough(_):
+            return _messages
+
+        _chain_source = RunnableLambda(_passthrough)
+
+        # For token-counting: extract text from each message (strips cache_control dicts)
+        def _msg_to_text(m) -> str:
+            if isinstance(m.content, str):
+                return m.content
+            if isinstance(m.content, list):
+                return " ".join(
+                    block.get("text", "") for block in m.content if isinstance(block, dict)
+                )
+            return str(m.content)
+
+        try:
+            prompt_text: str | None = "\n".join(_msg_to_text(m) for m in _messages)
+        except Exception:
+            prompt_text = None
+
+        # Plain-invoke fallback: strip list content to plain text messages
+        def _plain_messages_prompt():
+            from langchain_core.messages import SystemMessage as _SM, HumanMessage as _HM
+            plain = []
+            for m in _messages:
+                text = _msg_to_text(m)
+                plain.append(m.__class__(content=text))
+            return ChatPromptTemplate.from_messages(plain)
+
+    else:
+        _chain_source = prompt
+
+        # Render prompt text once so local tokenizer can count tokens without
+        # repeating the formatting work inside the retry loop.
+        try:
+            rendered_messages = prompt.format_messages(**inputs)
+            prompt_text = "\n".join(
+                m.content if isinstance(m.content, str) else str(m.content)
+                for m in rendered_messages
+            )
+        except Exception:
+            prompt_text = None
+
+        _plain_messages_prompt = None  # use original prompt in fallback
 
     from core.audit_logger import audit_event as _audit_event
 
@@ -180,9 +228,10 @@ def invoke_structured(
             if _ChatOpenAI is not None and isinstance(llm, _ChatOpenAI):
                 structured_kwargs["method"] = "function_calling"
 
-            chain = prompt | llm.with_structured_output(schema, **structured_kwargs)
+            chain = _chain_source | llm.with_structured_output(schema, **structured_kwargs)
             t0 = time.perf_counter()
-            raw_result = chain.invoke(inputs)
+            _invoke_inputs = {} if messages is not None else inputs
+            raw_result = chain.invoke(_invoke_inputs)
             llm_duration_ms = round((time.perf_counter() - t0) * 1000, 2)
 
             parsed = raw_result.get("parsed") if isinstance(raw_result, dict) else None
@@ -247,7 +296,9 @@ def invoke_structured(
         # === Plain-invoke fallback ===
         try:
             t0 = time.perf_counter()
-            parsed, usage, response_text = _plain_invoke(llm, prompt, inputs, schema)
+            _fallback_prompt = _plain_messages_prompt() if _plain_messages_prompt else prompt
+            _fallback_inputs = {} if _plain_messages_prompt else inputs
+            parsed, usage, response_text = _plain_invoke(llm, _fallback_prompt, _fallback_inputs, schema)
             llm_duration_ms = round((time.perf_counter() - t0) * 1000, 2)
             log_llm_cost(
                 llm, usage, agent_role,

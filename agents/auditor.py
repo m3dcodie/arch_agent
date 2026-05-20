@@ -7,10 +7,11 @@ import logging
 import uuid
 from typing import Dict, Any, List
 
+from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.language_models import BaseChatModel
 
-from agents.prompts import FALLBACK_AUDITOR_PROMPT, build_dynamic_prompt
+from agents.prompts import build_dynamic_prompt, build_system_prompt, TASK_HUMAN_TEMPLATE
 from core.state import AgentState
 from core.llm_utils import invoke_structured
 from models.violations import (
@@ -21,6 +22,35 @@ from models.violations import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Cache-support detection
+# ---------------------------------------------------------------------------
+
+def _is_cache_supported(llm: BaseChatModel) -> bool:
+    """Return True when the LLM supports Anthropic prompt caching.
+
+    Only Bedrock base Anthropic/Claude model IDs are eligible — they use the
+    non-Converse path where ``cache_control`` content blocks are forwarded to
+    the Anthropic API.  Inference profiles (Converse API) and all other
+    providers return False.
+    """
+    try:
+        from langchain_aws import ChatBedrock
+    except ImportError:
+        return False
+    if not isinstance(llm, ChatBedrock):
+        return False
+    model_id = (getattr(llm, "model_id", "") or "").lower()
+    is_anthropic = "anthropic" in model_id or "claude" in model_id
+    # Inference profiles have a two-character region prefix before the first dot
+    is_inference_profile = len(model_id.split(".")[0]) == 2
+    if is_inference_profile or not is_anthropic:
+        return False
+    # Verify the beta header was actually set on the model instance
+    model_kwargs = getattr(llm, "model_kwargs", {}) or {}
+    return "prompt-caching-2024-07-31" in model_kwargs.get("anthropic_beta", [])
 
 
 # ---------------------------------------------------------------------------
@@ -93,21 +123,38 @@ def auditor_node(state: AgentState, llm: BaseChatModel) -> Dict[str, Any]:
 
         resources_json = _format_resources_for_prompt(parsed_resources)
 
-        if retrieved_policies:
-            prompt_text = build_dynamic_prompt(retrieved_policies)
-            message_prefix = (
-                f"[AUDITOR] Auditing against {len(retrieved_policies)} retrieved policies"
+        message_prefix = (
+            f"[AUDITOR] Auditing against {len(retrieved_policies)} retrieved policies"
+            if retrieved_policies
+            else "[AUDITOR] No RAG policies retrieved — using built-in policy set"
+        )
+
+        if _is_cache_supported(llm):
+            # Cached path — large static block (Role + Policies + Constraints) goes
+            # into a SystemMessage with cache_control so Anthropic reuses the KV
+            # cache across successive calls with the same policy set.
+            logger.debug("[AUDITOR] Using Anthropic prompt-caching path")
+            system_text = build_system_prompt(retrieved_policies)
+            cached_messages = [
+                SystemMessage(content=[
+                    {
+                        "type": "text",
+                        "text": system_text,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ]),
+                HumanMessage(content=TASK_HUMAN_TEMPLATE.format(resources_json=resources_json)),
+            ]
+            result = invoke_structured(
+                llm, None, {}, ViolationList, agent_role="auditor", messages=cached_messages
             )
         else:
-            prompt_text = FALLBACK_AUDITOR_PROMPT
-            message_prefix = (
-                "[AUDITOR] Using fallback policy (RAG disabled or no policies retrieved)"
+            # Standard path — single prompt template with no cache hints
+            prompt_text = build_dynamic_prompt(retrieved_policies)
+            prompt = ChatPromptTemplate.from_template(prompt_text)
+            result = invoke_structured(
+                llm, prompt, {"resources_json": resources_json}, ViolationList, agent_role="auditor"
             )
-
-        prompt = ChatPromptTemplate.from_template(prompt_text)
-        result = invoke_structured(
-            llm, prompt, {"resources_json": resources_json}, ViolationList, agent_role="auditor"
-        )
 
         violations = result.violations if result else []
         _assign_violation_ids(violations)
