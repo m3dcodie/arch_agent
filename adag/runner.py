@@ -140,6 +140,7 @@ class ADAGRunner:
                             total_resources=len(raw.get("parsed_resources", [])),
                             violations=raw.get("violations", []),
                             summary=self._build_summary(raw),
+                            error_message=raw.get("error_message") or None,
                         )
                         n_violations = len(result.violations)
                         total_violations += n_violations
@@ -198,9 +199,12 @@ class ADAGRunner:
         violations = raw.get("violations", [])
         resources = raw.get("parsed_resources", [])
         status = raw.get("status")
+        if status and status.value == "error":
+            msg = raw.get("error_message") or "Audit failed — check logs for details."
+            return f"ERROR: {msg}"
         if status and status.value == "passed":
             return f"All {len(resources)} resource(s) passed all policy checks."
-        elif violations:
+        if violations:
             return (
                 f"Found {len(violations)} violation(s) across "
                 f"{len(resources)} resource(s)."
