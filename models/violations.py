@@ -125,7 +125,7 @@ class AuditStatus(str, Enum):
 
 class AuditResult(BaseModel):
     """Final audit result"""
-    
+
     status: AuditStatus = Field(
         description="Overall audit status"
     )
@@ -143,6 +143,10 @@ class AuditResult(BaseModel):
     summary: str = Field(
         default="",
         description="Human-readable summary of the audit"
+    )
+    error_message: Optional[str] = Field(
+        default=None,
+        description="Error detail when status is ERROR"
     )
     
     @property
@@ -167,7 +171,7 @@ class AuditResult(BaseModel):
 
     def to_json(self) -> dict:
         """Serialise the result to a plain dictionary (JSON-friendly)."""
-        return {
+        out = {
             "status": self.status.value,
             "file_path": self.file_path,
             "total_resources": self.total_resources,
@@ -192,6 +196,9 @@ class AuditResult(BaseModel):
                 for v in self.violations
             ],
         }
+        if self.error_message:
+            out["error_message"] = self.error_message
+        return out
 
     def to_sarif(self) -> dict:
         """
