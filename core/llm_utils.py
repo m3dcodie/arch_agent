@@ -38,7 +38,6 @@ _RATE_LIMIT_SIGNALS = (
 # E.g. openai.PermissionDeniedError: "Access to this endpoint is forbidden.
 # Please review our Terms of Service."
 _PERMANENT_DENIAL_SIGNALS = (
-    "terms of service",
     "your account",
     "account has been",
     "suspended",

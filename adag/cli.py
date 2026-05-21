@@ -86,7 +86,7 @@ def scan(path, policies_dir, llm_provider, output_format, no_rag, quiet):
             terraform_file=str(path_obj) if path_obj.is_file() else None,
             policies_dir=policies_dir,
             llm_provider=llm_provider,
-            use_rag=False if no_rag else (os.getenv("USE_RAG", "true").lower() == "true"),
+            use_rag=False if no_rag else (os.getenv("USE_RAG", "false").lower() == "true"),
         )
     except Exception as e:
         click.echo(f"Error initialising ADAG: {e}", err=True)
@@ -147,6 +147,9 @@ def _print_text(results, quiet: bool):
             click.echo(f"Status:     {symbol} {result.status.value.upper()}")
             click.echo(f"Resources:  {result.total_resources}")
             click.echo(f"Violations: {len(result.violations)}")
+
+        if result.status.value == "error" and result.error_message:
+            click.echo(f"  Error: {result.error_message}")
 
         if result.violations:
             total_violations += len(result.violations)
