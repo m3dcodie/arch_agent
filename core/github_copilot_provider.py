@@ -15,9 +15,9 @@ OAuth scope — grant it with::
 
 Token sources (tried in priority order):
 
-1. ``GITHUB_COPILOT_TOKEN`` env var — set to the output of::
-
-       gh auth status --show-token
+1. ``GH_COPILOT_TOKEN`` env var (canonical — safe in GitHub Actions).
+   ``GITHUB_COPILOT_TOKEN`` is also accepted for local ``.env`` usage
+   (``GITHUB_*`` is reserved in GitHub Actions and cannot be set as a secret).
 
 2. ``~/.config/gh/hosts.yml`` — written by ``gh auth login`` automatically.
 
@@ -120,7 +120,8 @@ def _resolve_oauth_token() -> str:
         "Run the following and add the token to your .env:\n"
         "  gh auth login --scopes 'copilot'\n"
         "  gh auth status --show-token\n"
-        "Then set: GITHUB_COPILOT_TOKEN=<token>"
+        "Then set: GH_COPILOT_TOKEN=<token>\n"
+        "(In GitHub Actions use GH_COPILOT_TOKEN — GITHUB_* names are reserved)"
     )
 
 

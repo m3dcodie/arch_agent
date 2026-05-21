@@ -19,6 +19,7 @@ Built to explore and demonstrate: **LangGraph** · **Multi-Agent Systems** · **
 - Quick Start
 - RAG Mode
 - MCP Server
+- CI/CD Integration
 - Running Tests
 - Benchmarks
 - Documentation
@@ -82,6 +83,46 @@ LLM_TEMPERATURE=0       # greedy decoding — required for deterministic complia
 LLM_MAX_TOKENS=4096     # cap output length; increase for very large Terraform files
 ```
 
+**GitHub Copilot (recommended for Copilot subscribers — Claude + GPT models):**
+
+1. Authenticate with the `copilot` scope:
+   ```bash
+   gh auth login --scopes 'copilot'
+   gh auth status --show-token   # copy the gho_… token
+   ```
+
+```ini
+# .env
+LLM_PROVIDER=github-copilot
+GITHUB_COPILOT_TOKEN=gho_your_token_here
+GITHUB_COPILOT_MODEL=claude-sonnet-4.5   # default model
+LLM_TEMPERATURE=0
+LLM_MAX_TOKENS=4096
+```
+
+Available models on the Copilot API:
+
+| Model ID | Family |
+|----------|--------|
+| `claude-sonnet-4.5` | Anthropic (default) |
+| `claude-sonnet-4` | Anthropic |
+| `claude-haiku-4.5` | Anthropic (fast) |
+| `claude-opus-4.5` | Anthropic (most capable) |
+| `gpt-4.1` | OpenAI |
+| `gpt-4.1-2025-04-14` | OpenAI |
+| `gpt-4o-mini` | OpenAI (fast) |
+| `gpt-4o-mini-2024-07-18` | OpenAI (fast) |
+
+> **Model ID format** — Copilot model IDs do **not** use a provider prefix (`gpt-4.1`, not `openai/gpt-4.1`). GitHub Models uses the `openai/` prefix (`openai/gpt-4.1`). Using the wrong format returns `unknown model`.
+
+> **In GitHub Actions** — `GITHUB_*` names are reserved for built-in secrets. Store your token as `GH_COPILOT_TOKEN` in repo secrets, then map it in your workflow step:
+> ```yaml
+> env:
+>   GITHUB_COPILOT_TOKEN: ${{ secrets.GH_COPILOT_TOKEN }}
+> ```
+
+---
+
 **AWS Bedrock:**
 
 ```ini
@@ -132,7 +173,25 @@ ADAG applies the [LLM Capability Framework (LCF)](https://github.com/m3dcodie/LL
 | **Intake**  | L1 — The Scout      | Deterministic structured JSON extraction from Terraform HCL  | 4B–14B distilled (fast, instruction-following) |
 | **Auditor** | L3 — The Strategist | Policy gap analysis, compliance judgement, remediation hints | 14B–70B logic-heavy (reasoning depth)          |
 
+**`AUDITOR_MODEL` is the most important variable** — it controls which model performs the compliance reasoning. If it is not set, the provider's default model is used for everything. Set it explicitly to get predictable, consistent audit results:
+
+```ini
+AUDITOR_MODEL=claude-haiku-4.5   # GitHub Copilot
+AUDITOR_MODEL=openai/gpt-4.1     # GitHub Models
+```
+
 Set `INTAKE_MODEL` and `AUDITOR_MODEL` independently to use the right tier for each job:
+
+```ini
+# .env — GitHub Copilot example
+LLM_PROVIDER=github-copilot
+GITHUB_COPILOT_TOKEN=gho_your_token_here
+
+INTAKE_MODEL=gpt-4o-mini          # fast — structured JSON extraction
+AUDITOR_MODEL=claude-haiku-4.5    # fast + accurate — policy reasoning
+# or for maximum accuracy:
+# AUDITOR_MODEL=claude-sonnet-4.5
+```
 
 ```ini
 # .env — GitHub Models example
@@ -316,6 +375,25 @@ See [docs/RAG_PIPELINE.md](docs/RAG_PIPELINE.md) for the full setup guide, micro
 
 Connect ADAG to Claude Desktop so it can check compliance mid-conversation:
 
+**GitHub Copilot:**
+```json
+{
+  "mcpServers": {
+    "adag": {
+      "command": "python",
+      "args": ["-m", "adag.mcp_server"],
+      "env": {
+        "LLM_PROVIDER": "github-copilot",
+        "GITHUB_COPILOT_TOKEN": "gho_your_token_here",
+        "GITHUB_COPILOT_MODEL": "claude-sonnet-4.5",
+        "USE_RAG": "false"
+      }
+    }
+  }
+}
+```
+
+**GitHub Models:**
 ```json
 {
   "mcpServers": {
@@ -334,6 +412,64 @@ Connect ADAG to Claude Desktop so it can check compliance mid-conversation:
 ```
 
 Then ask Claude: _"Check my Terraform at `/home/me/infra/main.tf` for compliance issues."_
+
+---
+
+## CI/CD Integration — GitHub Actions
+
+Drop the ready-made workflow into your repo to get automated Terraform governance on every pull request.
+
+> **Live example** — [m3dcodie/arch_agent_ci-demo PR #1](https://github.com/m3dcodie/arch_agent_ci-demo/pull/1) shows a real scan run: violations detected, bot comment posted, and a passing run after fixes.
+
+### Setup
+
+**1. Copy the workflow file**
+
+```bash
+mkdir -p .github/workflows
+cp docs/github_workflow/adag-scan.yml .github/workflows/adag-scan.yml
+```
+
+Or copy it from [`docs/github_workflow/adag-scan.yml`](docs/github_workflow/adag-scan.yml).
+
+**2. Add the Copilot token as a repository secret**
+
+In your repo: **Settings → Secrets and variables → Actions → New repository secret**
+
+| Name | Value |
+|------|-------|
+| `GH_COPILOT_TOKEN` | Your `gho_…` OAuth token (`gh auth status --show-token`) |
+
+> `GITHUB_*` names are reserved by GitHub Actions for built-in secrets — store your token as `GH_COPILOT_TOKEN`. The workflow maps it to `GITHUB_COPILOT_TOKEN` inside the step via `env:`.
+
+**3. Set repository variables** (optional — defaults to provider model if unset)
+
+In your repo: **Settings → Secrets and variables → Actions → Variables**
+
+| Name | Example value |
+|------|---------------|
+| `AUDITOR_MODEL` | `claude-haiku-4.5` |
+| `INTAKE_MODEL` | `gpt-4o-mini` |
+
+**4. Add a `policies/` folder** to your repo root with your `.md` policy files (or use the built-in bundle by removing `--policies-dir` from the workflow).
+
+### What the workflow does
+
+| Step | What happens |
+|------|-------------|
+| `adag scan` | Scans all `infrastructure/**/*.tf` files, outputs JSON |
+| Convert to SARIF | Python script converts JSON → SARIF 2.1.0 (no extra LLM call) |
+| Upload SARIF | Violations appear in the **Security** tab as code annotations |
+| Post PR comment | Bot posts a pass/fail summary table directly on the PR |
+| Fail the build | Exit code `1` (violations) or `2` (scan error) fails the check |
+
+### PR comment — violations found
+
+![ADAG scan FAILED — 10 violations](docs/github_workflow/scan10.png)
+
+### PR comment — all clear
+
+![ADAG scan PASSED — 0 violations](docs/github_workflow/scan1.png)
 
 ---
 
