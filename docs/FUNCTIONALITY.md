@@ -99,28 +99,37 @@ Human-readable output suitable for terminal use and code review feedback.
   ADAG - AI-Driven Architecture Guardrail
 ======================================================================
 
-File: infra/main.tf
-Resources Analyzed: 3
-Violations Found: 2
+File:         infra/main.tf
+Status:       ✗ FAILED
+Resources:    3
+Violations:   2
+Suggestions:  2
 
-----------------------------------------------------------------------
-VIOLATIONS
-----------------------------------------------------------------------
+  1. 🔴 [HIGH] main
+     Issue:  Database instance does not have deletion protection enabled.
+     Hint:   Add 'deletion_protection = true' to the resource block.
+     Line:   3
 
-1. [HIGH] aws_db_instance / main
-   Policy:      delete_protection
-   Issue:       Database instance does not have deletion protection enabled.
-   Line:        3
-   Remediation: Add 'deletion_protection = true' to the resource block.
+     💡 Suggested fix  (Set deletion_protection to true to satisfy the delete_protection policy.)
+     ──────────────────────────────────────────────────
+     -   deletion_protection = false
+     +   deletion_protection = true
+     ──────────────────────────────────────────────────
 
-2. [MEDIUM] aws_db_instance / main
-   Policy:      multi_az_requirement
-   Issue:       Database instance does not have multi-AZ enabled.
-   Line:        3
-   Remediation: Add 'multi_az = true' to the resource block.
+  2. 🟡 [MEDIUM] main
+     Issue:  Database instance does not have multi-AZ enabled.
+     Hint:   Add 'multi_az = true' to the resource block.
+     Line:   3
 
-----------------------------------------------------------------------
-Status: FAILED
+     💡 Suggested fix  (Set multi_az to true to satisfy the multi_az_requirement policy.)
+     ──────────────────────────────────────────────────
+     -   multi_az = false
+     +   multi_az = true
+     ──────────────────────────────────────────────────
+
+======================================================================
+  ✗ 2 violation(s) found
+======================================================================
 ```
 
 ### JSON
@@ -143,19 +152,20 @@ Machine-readable format. Use with `--format json`.
         "description": "Database instance does not have deletion protection enabled.",
         "line_number": 3,
         "remediation_hint": "Add 'deletion_protection = true' to the resource block."
-      },
-      {
-        "id": "V-002",
-        "resource_type": "aws_db_instance",
-        "resource_name": "main",
-        "severity": "MEDIUM",
-        "policy_ref": "multi_az_requirement",
-        "description": "Database instance does not have multi-AZ enabled.",
-        "line_number": 3,
-        "remediation_hint": "Add 'multi_az = true' to the resource block."
       }
     ],
-    "summary": "2 violations found: 1 HIGH, 1 MEDIUM, 0 LOW"
+    "suggestions": [
+      {
+        "violation_id": "V-001",
+        "resource_type": "aws_db_instance",
+        "resource_name": "main",
+        "before_block": "  deletion_protection = false",
+        "after_block": "  deletion_protection = true",
+        "explanation": "Set deletion_protection to true to satisfy the delete_protection policy.",
+        "line_number": 3
+      }
+    ],
+    "summary": "1 violation found: 1 HIGH, 0 MEDIUM, 0 LOW"
   }
 ]
 ```

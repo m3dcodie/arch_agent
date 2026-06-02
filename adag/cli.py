@@ -138,32 +138,62 @@ def scan(path, policies_dir, llm_provider, output_format, no_rag, quiet):
 def _print_text(results, quiet: bool):
     total_violations = 0
 
+    # Build a lookup: violation_id → patch dict for quick inline rendering
+    def _patch_index(result) -> dict:
+        idx = {}
+        for s in result.suggestions:
+            vid = s.get("violation_id") if isinstance(s, dict) else getattr(s, "violation_id", None)
+            if vid:
+                idx[vid] = s
+        return idx
+
     for result in results:
         symbol = {"passed": "✓", "failed": "✗", "error": "⚠"}.get(
             result.status.value, "?"
         )
         if not quiet:
-            click.echo(f"File:       {result.file_path}")
-            click.echo(f"Status:     {symbol} {result.status.value.upper()}")
-            click.echo(f"Resources:  {result.total_resources}")
-            click.echo(f"Violations: {len(result.violations)}")
+            click.echo(f"File:         {result.file_path}")
+            click.echo(f"Status:       {symbol} {result.status.value.upper()}")
+            click.echo(f"Resources:    {result.total_resources}")
+            click.echo(f"Violations:   {len(result.violations)}")
+            click.echo(f"Suggestions:  {len(result.suggestions)}")
 
         if result.status.value == "error" and result.error_message:
             click.echo(f"  Error: {result.error_message}")
 
         if result.violations:
             total_violations += len(result.violations)
+            patch_idx = _patch_index(result)
             click.echo()
             for i, v in enumerate(result.violations, 1):
                 badge = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}.get(
                     v.severity.value, "⚪"
                 )
                 click.echo(f"  {i}. {badge} [{v.severity.value}] {v.resource_name}")
-                click.echo(f"     Issue: {v.description}")
+                click.echo(f"     Issue:  {v.description}")
                 if v.remediation_hint:
-                    click.echo(f"     Fix:   {v.remediation_hint}")
+                    click.echo(f"     Hint:   {v.remediation_hint}")
                 if v.line_number:
-                    click.echo(f"     Line:  {v.line_number}")
+                    click.echo(f"     Line:   {v.line_number}")
+
+                # --- Inline suggestion (GitHub Copilot style) ---
+                patch = patch_idx.get(v.id)
+                if patch:
+                    before = (patch.get("before_block") if isinstance(patch, dict)
+                              else getattr(patch, "before_block", ""))
+                    after = (patch.get("after_block") if isinstance(patch, dict)
+                             else getattr(patch, "after_block", ""))
+                    explanation = (patch.get("explanation") if isinstance(patch, dict)
+                                   else getattr(patch, "explanation", ""))
+                    click.echo()
+                    click.echo(f"     💡 Suggested fix  ({explanation})")
+                    click.echo("     " + "─" * 50)
+                    for line in before.splitlines():
+                        click.echo(click.style(f"     - {line}", fg="red"))
+                    for line in after.splitlines():
+                        click.echo(click.style(f"     + {line}", fg="green"))
+                    click.echo("     " + "─" * 50)
+                click.echo()
         click.echo()
 
     if not quiet:

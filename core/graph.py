@@ -16,7 +16,9 @@ from core.audit_logger import AuditSpan
 from agents.intake import intake_node
 from agents.policy_analyst import policy_analyst_node
 from agents.auditor import auditor_node
+from agents.remediation import remediation_node
 from models.violations import AuditStatus
+from models.remediation import RemediationStatus
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +58,7 @@ class ADAGGraph:
         # (supported by all LLM providers: HuggingFace, Ollama, GitHub Copilot, and Bedrock).
         self.intake_llm = self._get_llm_for_role("INTAKE")
         self.auditor_llm = self._get_llm_for_role("AUDITOR")
+        self.remediation_llm = self._get_llm_for_role("REMEDIATION")
 
         # Build the graph
         self.graph = self._build_graph()
@@ -136,6 +139,13 @@ class ADAGGraph:
             "auditor",
             self._timed_node("auditor", lambda state: auditor_node(state, self.auditor_llm)),
         )
+        workflow.add_node(
+            "remediation",
+            self._timed_node(
+                "remediation",
+                lambda state: remediation_node(state, self.remediation_llm),
+            ),
+        )
 
         # Define the flow
         workflow.set_entry_point("intake")
@@ -154,12 +164,25 @@ class ADAGGraph:
             {"auditor": "auditor", "end": END},
         )
 
-        # Auditor always goes to END
-        workflow.add_edge("auditor", END)
+        # Auditor routes to remediation on FAILED, otherwise END
+        workflow.add_conditional_edges(
+            "auditor",
+            self._should_remediate,
+            {"remediation": "remediation", "end": END},
+        )
+
+        # Remediation always goes to END
+        workflow.add_edge("remediation", END)
 
         # Compile with checkpointer
         checkpointer = self.db_provider.get_checkpointer()
         return workflow.compile(checkpointer=checkpointer)
+
+    def _should_remediate(self, state: AgentState) -> str:
+        """Route to remediation when violations exist, otherwise END."""
+        if state.get("status") == AuditStatus.FAILED and state.get("violations"):
+            return "remediation"
+        return "end"
 
     def _should_continue_after_intake(self, state: AgentState) -> str:
         """
@@ -224,6 +247,8 @@ class ADAGGraph:
             "status": AuditStatus.PENDING,
             "current_node": "",
             "error_message": "",
+            "remediation_patches": [],
+            "remediation_status": RemediationStatus.SKIPPED,
         }
 
         # Each scan gets a fresh UUID thread_id so LangGraph never resumes
@@ -256,6 +281,8 @@ class ADAGGraph:
             "status": AuditStatus.PENDING,
             "current_node": "",
             "error_message": "",
+            "remediation_patches": [],
+            "remediation_status": RemediationStatus.SKIPPED,
         }
 
         for state in self.graph.stream(initial_state, **kwargs):

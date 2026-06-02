@@ -139,6 +139,7 @@ class ADAGRunner:
                             file_path=raw.get("file_path", str(tf_file)),
                             total_resources=len(raw.get("parsed_resources", [])),
                             violations=raw.get("violations", []),
+                            suggestions=raw.get("remediation_patches", []),
                             summary=self._build_summary(raw),
                             error_message=raw.get("error_message") or None,
                         )

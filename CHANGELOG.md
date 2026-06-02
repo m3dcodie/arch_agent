@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/) and this
 project follows Semantic Versioning (https://semver.org/).
 
+## [1.2.2] - 2026-06-02
+
+### Added
+
+- **Remediation Agent Designer** — a new fourth agent node (`agents/remediation.py`) that fires automatically after the Auditor when violations are found; produces one structured inline patch suggestion per violation, analogous to a GitHub Copilot inline PR suggestion: the user sees a `before` / `after` HCL diff and decides whether to apply it — nothing is written to disk automatically
+- **`models/remediation.py`** — three new Pydantic models: `RemediationPatch` (violation-linked before/after code block), `RemediationReport` (structured LLM output), `RemediationStatus` (`proposed` | `skipped` | `error`)
+- **`build_remediation_prompt()`** in `agents/prompts.py` — full 5-layer Prompt Contract prompt for the remediation agent; role scoped to Staff Infrastructure Engineer with write authority over HCL only; `before_block` must be verbatim from source, `after_block` is the minimal change to satisfy the violated policy
+- **`REMEDIATION_MODEL` env var** — per-agent model override for the remediation role, consistent with `INTAKE_MODEL` and `AUDITOR_MODEL`; allows routing remediation to a cheaper code-gen model (e.g. `openai/gpt-4.1-mini`) while keeping the auditor on a stronger reasoning model
+- **Inline diff rendering in CLI** — the `adag scan` text output now renders each patch suggestion directly under its violation as a red `- before` / green `+ after` diff block with a one-sentence explanation
+- **`suggestions` field on `AuditResult`** — all output surfaces (CLI `--format json`, MCP `scan` tool, Python API) now include the `suggestions` array alongside `violations`
+- **ADR-007** (`docs/ADR-007-Remediation-Agent-Design.md`) — architectural decision record covering three design options (Sequential Inline, Critic-Fixer Loop, HITL Map-Reduce) with pros/cons and rationale for selecting Option A
+
+### Changed
+
+- **Graph topology** (`core/graph.py`): `auditor → END` replaced by `auditor → remediation → END` (on `FAILED`); `PASSED` and `ERROR` still route directly to `END`
+- **`AgentState`** (`core/state.py`): two new fields — `remediation_patches: List[RemediationPatch]` and `remediation_status: RemediationStatus`
+- **`AuditResult`** (`models/violations.py`): new `suggestions: List[dict]` field; `to_json()` now serialises suggestions alongside violations
+- **`ADAGRunner.scan()`** (`adag/runner.py`): passes `remediation_patches` from raw graph state to `AuditResult.suggestions`
+- **CLI `_print_text()`** (`adag/cli.py`): violation output expanded with `Suggestions` count header and inline diff block per violation when a patch is available
+
+---
+
 ## [1.2.1] - 2026-05-20
 
 ### Added

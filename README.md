@@ -27,7 +27,7 @@ Built to explore and demonstrate: **LangGraph** · **Multi-Agent Systems** · **
 
 ## What it does
 
-ADAG reads your `.tf` files, checks them against 10 built-in compliance policies (or your own), and reports violations with remediation hints. It runs as a CLI tool, a Python library, or an MCP server that any AI assistant can call.
+ADAG reads your `.tf` files, checks them against 10 built-in compliance policies (or your own), and reports violations with inline patch suggestions. It runs as a CLI tool, a Python library, or an MCP server that any AI assistant can call.
 
 ```bash
 pip install adag
@@ -35,20 +35,33 @@ adag scan ./infra/
 ```
 
 ```
-File: infra/database.tf  |  Resources: 3  |  Violations: 2
+File:         infra/database.tf
+Status:       ✗ FAILED
+Resources:    3
+Violations:   2
+Suggestions:  2
 
-[HIGH]   aws_db_instance / main        → delete_protection: missing deletion_protection = true
-[MEDIUM] aws_db_instance / main        → multi_az_requirement: multi_az not enabled
+  1. 🔴 [HIGH] main
+     Issue:  Database instance does not have deletion protection enabled.
+     Hint:   Add 'deletion_protection = true' to the resource block.
+     Line:   14
+
+     💡 Suggested fix  (Set deletion_protection to true to satisfy the delete_protection policy.)
+     ──────────────────────────────────────────────────
+     -   deletion_protection = false
+     +   deletion_protection = true
+     ──────────────────────────────────────────────────
 
 Status: FAILED  (exit code 1)
 ```
 
 ## Key Features
 
-- **Multi-agent graph** — three specialised agents (Intake, Policy Analyst, Auditor) orchestrated by LangGraph
+- **Multi-agent graph** — four specialised agents (Intake → Policy Analyst → Auditor → Remediation) orchestrated by LangGraph
 - **Deterministic parsing** — the HCL parser (`core/hcl_parser.py`) never calls an LLM; regex extraction eliminates false positives from hallucinated attribute values. All resource types present in the Terraform file are extracted and passed to the policy analyst and auditor — no hardcoded filter list
+- **Inline patch suggestions** — when violations are found, the Remediation Agent proposes `before` / `after` HCL diffs per violation (like GitHub Copilot inline PR suggestions); nothing is auto-applied — the user decides
 - **10 built-in policies** — deletion protection, encryption at rest, public access block, multi-AZ, backup retention, KMS key rotation, allowed regions, required tagging, naming conventions
-- **Five LLM providers** — AWS Bedrock, GitHub Models, GitHub Copilot (IDE), HuggingFace, Ollama (fully local); all support **per-agent model selection** (`INTAKE_MODEL`, `AUDITOR_MODEL`) so you can use a fast small model for parsing and a powerful reasoning model for policy judgement
+- **Five LLM providers** — AWS Bedrock, GitHub Models, GitHub Copilot (IDE), HuggingFace, Ollama (fully local); all support **per-agent model selection** (`INTAKE_MODEL`, `AUDITOR_MODEL`, `REMEDIATION_MODEL`) so you can use a fast small model for parsing and a powerful reasoning model for policy judgement
 - **Three output formats** — human-readable text, JSON, SARIF 2.1.0 (GitHub Advanced Security)
 - **MCP server** — any MCP-compatible AI assistant (Claude Desktop, VS Code Copilot) can call ADAG as a tool
 - **RAG mode** — index your internal architecture docs and query them semantically at scan time
