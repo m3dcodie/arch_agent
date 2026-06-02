@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/) and this
 project follows Semantic Versioning (https://semver.org/).
 
-## [Unreleased] — feature/v2-remediation
+## [1.2.2] - 2026-06-02
 
 ### Added
 
