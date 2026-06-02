@@ -1,9 +1,12 @@
 """
 Pydantic models for violations and audit results.
 """
-from typing import Optional, List
+from typing import TYPE_CHECKING, Optional, List
 from enum import Enum
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from models.remediation import RemediationPatch
 
 
 class Severity(str, Enum):
@@ -140,6 +143,10 @@ class AuditResult(BaseModel):
         default_factory=list,
         description="List of violations found"
     )
+    suggestions: List[dict] = Field(
+        default_factory=list,
+        description="Inline patch suggestions proposed by the Remediation Agent (one per violation)"
+    )
     summary: str = Field(
         default="",
         description="Human-readable summary of the audit"
@@ -195,6 +202,7 @@ class AuditResult(BaseModel):
                 }
                 for v in self.violations
             ],
+            "suggestions": self.suggestions,
         }
         if self.error_message:
             out["error_message"] = self.error_message

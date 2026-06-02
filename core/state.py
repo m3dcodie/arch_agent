@@ -7,6 +7,7 @@ import operator
 
 from models.violations import Violation, TerraformResource, AuditStatus
 from models.policy import Policy
+from models.remediation import RemediationPatch, RemediationStatus
 
 
 class AgentState(TypedDict):
@@ -32,7 +33,11 @@ class AgentState(TypedDict):
     # Output data
     violations: List[Violation]  # Found policy violations
     status: AuditStatus  # Current audit status
-    
+
+    # Remediation output
+    remediation_patches: List[RemediationPatch]  # Inline patch suggestions (one per violation)
+    remediation_status: RemediationStatus  # Outcome of the remediation pass
+
     # Metadata
     current_node: str  # Current node being executed (for debugging)
     error_message: str  # Error message if status is ERROR
