@@ -36,6 +36,7 @@ All ADAG configuration is done via environment variables, either in a `.env` fil
 | `BEDROCK_TEMPERATURE` | `0`                                         | Sampling temperature. **Keep at 0** — auditor is deterministic compliance checking.   |
 | `INTAKE_MODEL`        | _(same as BEDROCK_MODEL)_                   | Override model for the intake agent role.                                             |
 | `AUDITOR_MODEL`       | _(same as BEDROCK_MODEL)_                   | Override model for the auditor agent role.                                            |
+| `REMEDIATION_MODEL`   | _(same as BEDROCK_MODEL)_                   | Override model for the remediation agent role. Use a cheaper code-gen model here.     |
 
 **Backwards compatibility:** `ANTHROPIC_MODEL` is still supported but deprecated. Use `BEDROCK_MODEL` for consistency with other providers.
 
@@ -58,6 +59,7 @@ The provider auto-detects inference profile models (2-char prefix) and switches 
 | `GITHUB_MODELS_MODEL`       | `openai/gpt-4.1`    | Default model for all agents. Use `vendor/model-id` format (e.g. `openai/gpt-4o-mini`).                                                                                                                          |
 | `INTAKE_MODEL`              | _(same as default)_ | Override model for the intake agent role.                                                                                                                                                                        |
 | `AUDITOR_MODEL`             | _(same as default)_ | Override model for the auditor agent role.                                                                                                                                                                       |
+| `REMEDIATION_MODEL`         | _(same as default)_ | Override model for the remediation agent role. A faster/cheaper model works well here (e.g. `openai/gpt-4.1-mini`).                                                                                              |
 | `GITHUB_MODELS_TEMPERATURE` | `0`                 | Sampling temperature. **Keep at 0** for deterministic compliance output.                                                                                                                                         |
 | `GITHUB_MODELS_MAX_TOKENS`  | `4096`              | Max completion tokens.                                                                                                                                                                                           |
 | `GITHUB_MODELS_TIMEOUT`     | `60`                | Request timeout in seconds.                                                                                                                                                                                      |
@@ -82,6 +84,7 @@ Model names use the `vendor/model-id` format as listed in the [GitHub Models mar
 | `GITHUB_COPILOT_MODEL` | `claude-sonnet-4.5` | Default model for all agents.                                                                                                       |
 | `INTAKE_MODEL`         | _(same as default)_ | Override model for the intake agent role.                                                                                           |
 | `AUDITOR_MODEL`        | _(same as default)_ | Override model for the auditor agent role.                                                                                          |
+| `REMEDIATION_MODEL`    | _(same as default)_ | Override model for the remediation agent role.                                                                                      |
 
 **Available Copilot models (as of April 2026):**
 
@@ -102,6 +105,7 @@ Model names use the `vendor/model-id` format as listed in the [GitHub Models mar
 | `HF_MAX_TOKENS`  | `4096`                     | Max completion tokens. 4096 handles large Terraform files with many violations.                      |
 | `INTAKE_MODEL`   | _(same as HF_MODEL)_       | Override model for the intake agent role.                                                            |
 | `AUDITOR_MODEL`  | _(same as HF_MODEL)_       | Override model for the auditor agent role.                                                           |
+| `REMEDIATION_MODEL` | _(same as HF_MODEL)_    | Override model for the remediation agent role.                                                       |
 
 **Recommended HuggingFace models for auditing:**
 
@@ -121,6 +125,7 @@ Model names use the `vendor/model-id` format as listed in the [GitHub Models mar
 | `OLLAMA_TIMEOUT`     | `120`                    | Request timeout in seconds. Increase for large models on slow hardware.  |
 | `INTAKE_MODEL`       | _(same as OLLAMA_MODEL)_ | Override model for the intake agent role.                                |
 | `AUDITOR_MODEL`      | _(same as OLLAMA_MODEL)_ | Override model for the auditor agent role.                               |
+| `REMEDIATION_MODEL`  | _(same as OLLAMA_MODEL)_ | Override model for the remediation agent role.                           |
 
 ### RAG Microservices (Mode 3 only)
 

@@ -144,7 +144,19 @@ START
                          │  Exponential backoff on 429s  │
                          └──────────────┬────────────────┘
                                         │
-                                       END
+                                        │ _should_remediate()
+                                        ├── "end"         if PASSED or ERROR
+                                        └── "remediation" if FAILED
+                                                   │
+                                                   ▼
+                              ┌─────────────────────────────┐
+                              │        remediation             │
+                              │  LLM-driven patch generation  │
+                              │  One before/after per violation│
+                              │  Nothing written to disk       │
+                              └───────────────┬─────────────┘
+                                             │
+                                            END
 ```
 
 ### Checkpointing
@@ -205,7 +217,7 @@ Checkpoints exist for debugging (you can inspect the SQLite DB to see intermedia
 
 **Purpose:** Cross-check parsed resources against retrieved policies using an LLM.
 
-**Key property:** This is the only agent that makes LLM calls.
+**Key property:** This is the only agent that makes LLM calls in the audit pass.
 
 **What it does:**
 
@@ -220,22 +232,44 @@ Checkpoints exist for debugging (you can inspect the SQLite DB to see intermedia
 
 ---
 
+### Agent 4: Remediation (`agents/remediation.py`)
+
+**Purpose:** Propose inline `before` / `after` HCL patch suggestions for every violation found by the Auditor.
+
+**Key property:** Fires only when `status == FAILED`. Skipped entirely when there are no violations — zero extra LLM calls on passing scans.
+
+**What it does:**
+
+- Receives `violations[]` and the original `iac_code` from state — no access to policy documents
+- Makes a single structured LLM call returning a `RemediationReport` (one `RemediationPatch` per violation)
+- Each `RemediationPatch` contains: `violation_id` (links back to `Violation.id`), `resource_name`, `before_block` (verbatim from source), `after_block` (minimal corrected HCL), `explanation` (one sentence)
+- Nothing is written to disk — patches are stored in state and surfaced to the user as suggestions
+- The model used is controlled by `REMEDIATION_MODEL` env var; falls back to the provider default (same as auditor)
+
+**Why this is safe:** The prompt scope is intentionally narrow — the agent receives only violations (structured, Pydantic-validated) and the original source, not raw policy text or live AWS state. Output is always gated by the `RemediationReport` schema enforced by `invoke_structured`.
+
+**Output into state:** `remediation_patches: List[RemediationPatch]`, `remediation_status: RemediationStatus`
+
+---
+
 ## 5. Shared State Machine
 
 All agents communicate exclusively through `AgentState` — a LangGraph `TypedDict` passed through the graph. No direct agent-to-agent calls exist.
 
 ```python
 class AgentState(TypedDict):
-    messages: Annotated[list, operator.add]   # append-only message log
-    iac_code: str                              # raw Terraform content
-    file_path: str                             # source file path
-    parsed_resources: List[TerraformResource] # set by intake
-    retrieved_policies: List[Policy]           # set by policy_analyst
-    resource_types: List[str]                  # set by policy_analyst
-    violations: List[Violation]                # set by auditor
-    status: AuditStatus                        # PENDING → IN_PROGRESS → PASSED/FAILED/ERROR
-    current_node: str                          # for debugging
-    error_message: str                         # if status == ERROR
+    messages: Annotated[list, operator.add]      # append-only message log
+    iac_code: str                                # raw Terraform content
+    file_path: str                               # source file path
+    parsed_resources: List[TerraformResource]    # set by intake
+    retrieved_policies: List[Policy]             # set by policy_analyst
+    resource_types: List[str]                    # set by policy_analyst
+    violations: List[Violation]                  # set by auditor
+    status: AuditStatus                          # PENDING → IN_PROGRESS → PASSED/FAILED/ERROR
+    remediation_patches: List[RemediationPatch]  # set by remediation (empty when PASSED)
+    remediation_status: RemediationStatus        # proposed | skipped | error
+    current_node: str                            # for debugging
+    error_message: str                           # if status == ERROR
 ```
 
 ### AuditStatus Flow
