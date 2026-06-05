@@ -4,9 +4,11 @@
 ![Version](https://img.shields.io/github/v/tag/m3dcodie/arch_agent?label=version&color=blue)
 ![Stars](https://img.shields.io/badge/stargazers-welcome-yellow)
 
-A multi-agent AI system that acts as a **virtual principal engineer** — scanning Terraform infrastructure-as-code against your organisation's policy standards and returning intelligent, actionable audit results.
+A **Prompt Chaining Workflow** that acts as a **virtual principal engineer** — scanning Terraform infrastructure-as-code against your organisation's policy standards and returning intelligent, actionable audit results.
 
-Built to explore and demonstrate: **LangGraph** · **Multi-Agent Systems** · **RAG** · **MCP** · **LLM Provider Abstraction**
+Following [Anthropic's Building Effective Agents best practices](https://www.anthropic.com/research/building-effective-agents), ADAG is intentionally implemented as a **Prompt Chaining Workflow** with Routing gates, not an autonomous agent. The execution path is defined in code, not decided by an LLM — making compliance results deterministic, reproducible, and auditable.
+
+Built to explore and demonstrate: **LangGraph** · **Prompt Chaining Workflows** · **RAG** · **MCP** · **LLM Provider Abstraction**
 
 ![ADAG demo](docs/ADAG-v2.gif)
 
@@ -57,7 +59,7 @@ Status: FAILED  (exit code 1)
 
 ## Key Features
 
-- **Multi-agent graph** — four specialised agents (Intake → Policy Analyst → Auditor → Remediation) orchestrated by LangGraph
+- **Prompt Chaining Workflow** — four specialised nodes (Intake → Policy Analyst → Auditor → Remediation) chained through a predefined code path, not LLM-directed; implements Anthropic's [Prompt Chaining + Routing](https://www.anthropic.com/research/building-effective-agents) patterns for predictable, reproducible compliance results
 - **Deterministic parsing** — the HCL parser (`core/hcl_parser.py`) never calls an LLM; regex extraction eliminates false positives from hallucinated attribute values. All resource types present in the Terraform file are extracted and passed to the policy analyst and auditor — no hardcoded filter list
 - **Inline patch suggestions** — when violations are found, the Remediation Agent proposes `before` / `after` HCL diffs per violation (like GitHub Copilot inline PR suggestions); nothing is auto-applied — the user decides
 - **10 built-in policies** — deletion protection, encryption at rest, public access block, multi-AZ, backup retention, KMS key rotation, allowed regions, required tagging, naming conventions
