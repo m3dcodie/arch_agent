@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on Keep a Changelog (https://keepachangelog.com/) and this
 project follows Semantic Versioning (https://semver.org/).
 
+## [1.2.6] - 2026-06-05
+
+### Added
+
+- **Workflow vs. Agent classification documented** — ADAG is formally classified as a **workflow** (not an autonomous agent) per [Anthropic's Building Effective Agents best practices](https://www.anthropic.com/research/building-effective-agents); specifically implements the **Prompt Chaining** pattern with **Routing** gates; rationale and rejected alternatives documented in `docs/ARCHITECTURE.md` (Decision 6) and `docs/ADR-002-LangGraph-Orchestration.md`
+
+### Changed
+
+- **`docs/ARCHITECTURE.md`** — added Decision 6 explaining Anthropic's workflow vs. agent distinction, why ADAG uses a workflow, and why autonomous agent behaviour was rejected for a compliance guardrail tool
+- **`docs/ADR-002-LangGraph-Orchestration.md`** — added "Workflow vs. Agent Classification" section with a pattern coverage table (Prompt Chaining ✅, Routing ✅, Parallelization ❌, Orchestrator–subagents ❌, Evaluator–optimizer ❌); added Anthropic reference
+- **`docs/ADAG-v2.gif`** — updated demo GIF; `README.md` updated to reference `ADAG-v2.gif`
+
+---
+
 ## [1.2.2] - 2026-06-02
 
 ### Added
