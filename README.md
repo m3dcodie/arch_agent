@@ -8,7 +8,7 @@ A multi-agent AI system that acts as a **virtual principal engineer** — scanni
 
 Built to explore and demonstrate: **LangGraph** · **Multi-Agent Systems** · **RAG** · **MCP** · **LLM Provider Abstraction**
 
-![ADAG demo](docs/ADAG-v1.gif)
+![ADAG demo](docs/ADAG-v2.gif)
 
 ---
 
@@ -115,20 +115,21 @@ LLM_MAX_TOKENS=4096
 
 Available models on the Copilot API:
 
-| Model ID | Family |
-|----------|--------|
-| `claude-sonnet-4.5` | Anthropic (default) |
-| `claude-sonnet-4` | Anthropic |
-| `claude-haiku-4.5` | Anthropic (fast) |
-| `claude-opus-4.5` | Anthropic (most capable) |
-| `gpt-4.1` | OpenAI |
-| `gpt-4.1-2025-04-14` | OpenAI |
-| `gpt-4o-mini` | OpenAI (fast) |
-| `gpt-4o-mini-2024-07-18` | OpenAI (fast) |
+| Model ID                 | Family                   |
+| ------------------------ | ------------------------ |
+| `claude-sonnet-4.5`      | Anthropic (default)      |
+| `claude-sonnet-4`        | Anthropic                |
+| `claude-haiku-4.5`       | Anthropic (fast)         |
+| `claude-opus-4.5`        | Anthropic (most capable) |
+| `gpt-4.1`                | OpenAI                   |
+| `gpt-4.1-2025-04-14`     | OpenAI                   |
+| `gpt-4o-mini`            | OpenAI (fast)            |
+| `gpt-4o-mini-2024-07-18` | OpenAI (fast)            |
 
 > **Model ID format** — Copilot model IDs do **not** use a provider prefix (`gpt-4.1`, not `openai/gpt-4.1`). GitHub Models uses the `openai/` prefix (`openai/gpt-4.1`). Using the wrong format returns `unknown model`.
 
 > **In GitHub Actions** — `GITHUB_*` names are reserved for built-in secrets. Store your token as `GH_COPILOT_TOKEN` in repo secrets, then map it in your workflow step:
+>
 > ```yaml
 > env:
 >   GITHUB_COPILOT_TOKEN: ${{ secrets.GH_COPILOT_TOKEN }}
@@ -389,6 +390,7 @@ See [docs/RAG_PIPELINE.md](docs/RAG_PIPELINE.md) for the full setup guide, micro
 Connect ADAG to Claude Desktop so it can check compliance mid-conversation:
 
 **GitHub Copilot:**
+
 ```json
 {
   "mcpServers": {
@@ -407,6 +409,7 @@ Connect ADAG to Claude Desktop so it can check compliance mid-conversation:
 ```
 
 **GitHub Models:**
+
 ```json
 {
   "mcpServers": {
@@ -449,8 +452,8 @@ Or copy it from [`docs/github_workflow/adag-scan.yml`](docs/github_workflow/adag
 
 In your repo: **Settings → Secrets and variables → Actions → New repository secret**
 
-| Name | Value |
-|------|-------|
+| Name               | Value                                                    |
+| ------------------ | -------------------------------------------------------- |
 | `GH_COPILOT_TOKEN` | Your `gho_…` OAuth token (`gh auth status --show-token`) |
 
 > `GITHUB_*` names are reserved by GitHub Actions for built-in secrets — store your token as `GH_COPILOT_TOKEN`. The workflow maps it to `GITHUB_COPILOT_TOKEN` inside the step via `env:`.
@@ -459,22 +462,22 @@ In your repo: **Settings → Secrets and variables → Actions → New repositor
 
 In your repo: **Settings → Secrets and variables → Actions → Variables**
 
-| Name | Example value |
-|------|---------------|
+| Name            | Example value      |
+| --------------- | ------------------ |
 | `AUDITOR_MODEL` | `claude-haiku-4.5` |
-| `INTAKE_MODEL` | `gpt-4o-mini` |
+| `INTAKE_MODEL`  | `gpt-4o-mini`      |
 
 **4. Add a `policies/` folder** to your repo root with your `.md` policy files (or use the built-in bundle by removing `--policies-dir` from the workflow).
 
 ### What the workflow does
 
-| Step | What happens |
-|------|-------------|
-| `adag scan` | Scans all `infrastructure/**/*.tf` files, outputs JSON |
-| Convert to SARIF | Python script converts JSON → SARIF 2.1.0 (no extra LLM call) |
-| Upload SARIF | Violations appear in the **Security** tab as code annotations |
-| Post PR comment | Bot posts a pass/fail summary table directly on the PR |
-| Fail the build | Exit code `1` (violations) or `2` (scan error) fails the check |
+| Step             | What happens                                                   |
+| ---------------- | -------------------------------------------------------------- |
+| `adag scan`      | Scans all `infrastructure/**/*.tf` files, outputs JSON         |
+| Convert to SARIF | Python script converts JSON → SARIF 2.1.0 (no extra LLM call)  |
+| Upload SARIF     | Violations appear in the **Security** tab as code annotations  |
+| Post PR comment  | Bot posts a pass/fail summary table directly on the PR         |
+| Fail the build   | Exit code `1` (violations) or `2` (scan error) fails the check |
 
 ### PR comment — violations found
 
@@ -512,21 +515,21 @@ benchmarks/
 
 Each run tests the auditor against 7 Terraform fixtures (5 expected FAIL, 2 expected PASS) and reports:
 
-| Metric        | What it measures                                                    |
-| ------------- | ------------------------------------------------------------------- |
-| **Recall**    | % of real violations caught — target ≥ 95% for compliance tooling  |
-| **Precision** | % of flagged violations that are genuine (not false positives)      |
-| **F1**        | Harmonic mean of recall and precision                               |
-| **Accuracy**  | Overall correct classifications (TP + TN) / total                  |
+| Metric          | What it measures                                                  |
+| --------------- | ----------------------------------------------------------------- |
+| **Recall**      | % of real violations caught — target ≥ 95% for compliance tooling |
+| **Precision**   | % of flagged violations that are genuine (not false positives)    |
+| **F1**          | Harmonic mean of recall and precision                             |
+| **Accuracy**    | Overall correct classifications (TP + TN) / total                 |
 | **Avg Latency** | Mean response time per scan                                       |
-| **Est. Cost** | Reference cost at published per-token list prices                   |
+| **Est. Cost**   | Reference cost at published per-token list prices                 |
 
 Results to date:
 
-| Model | Recall | Precision | F1 | Avg Latency |
-|-------|--------|-----------|----|-------------|
-| Claude Haiku 4.5 (Copilot) | 100% | 100% | 100% | 6.05s |
-| Gemini 2.5 Pro (Copilot) | 100% | 100% | 100% | 12.12s |
+| Model                      | Recall | Precision | F1   | Avg Latency |
+| -------------------------- | ------ | --------- | ---- | ----------- |
+| Claude Haiku 4.5 (Copilot) | 100%   | 100%      | 100% | 6.05s       |
+| Gemini 2.5 Pro (Copilot)   | 100%   | 100%      | 100% | 12.12s      |
 
 Both models achieve perfect scores on the current 7-fixture suite. The JSON files are machine-readable for tracking regressions across model versions over time.
 

@@ -429,6 +429,30 @@ def invoke_structured(llm, prompt, inputs, schema):
 
 ---
 
+### Decision 6: Workflow Pattern over Autonomous Agent
+
+**Choice:** ADAG implements a **workflow**, not an autonomous agent.
+
+**Anthropic's distinction** ([Building Effective Agents, Anthropic 2024](https://www.anthropic.com/research/building-effective-agents)):
+
+- **Workflows** — LLMs and tools orchestrated through predefined code paths.
+- **Agents** — LLMs dynamically direct their own processes and tool usage, deciding how to accomplish tasks.
+
+**Why workflow is correct for ADAG:** Compliance auditing is a well-defined, sequential task. The execution path — Intake → Policy Analyst → Auditor → Remediation — is always the same. Conditional edges (`_should_continue_after_intake`, `_should_remediate`) route based on Python `if` statements checking state values, not LLM decisions. The LLM acts as a bounded compliance evaluator inside a fixed structure, not as a director of its own process.
+
+**Pattern:** This matches Anthropic's **Prompt Chaining** workflow with **Routing** gates — each node's structured output feeds directly into the next, and routing gates skip stages on error or clean exit.
+
+**Why autonomous agents were rejected:** Giving an LLM freedom to decide execution order, which policies to load, or whether to re-audit after remediation would introduce:
+
+- **Unpredictability** — an autonomous LLM could skip the auditor or reorder evaluation steps
+- **Non-determinism** — compliance results must be reproducible; LLM-directed paths are not
+- **Untestability** — the test suite works because execution paths are deterministic; agent loops are not
+- **Security risk** — an autonomous LLM deciding what to audit and what to skip is unacceptable for a guardrail tool
+
+Anthropics's guidance is explicit: _"Workflows offer predictability and consistency for well-defined tasks."_ Auditing IaC against a fixed policy set is a well-defined task.
+
+---
+
 ## 9. Full Scan Sequence
 
 The following is the complete sequence for `adag scan bad_terraform.tf --llm-provider github-copilot`:
