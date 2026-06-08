@@ -224,18 +224,28 @@ class ADAGGraph:
         # hardcoded fallback prompt if neither is available.
         return "auditor"
 
-    def invoke(self, iac_code: str, file_path: str, **kwargs):
+    def invoke(self, iac_code: str, file_path: str, thread_id: Optional[str] = None, **kwargs):
         """
         Run the audit workflow on IaC code.
 
         Args:
             iac_code: Raw infrastructure-as-code content
             file_path: Path to the source file
-            **kwargs: Additional invoke options (e.g., config for checkpointing)
+            thread_id: LangGraph thread ID. If None, a fresh UUID is generated.
+                       Pass a known ID to resume a previously crashed run.
+            **kwargs: Additional invoke options
 
         Returns:
-            Final state after workflow execution
+            Final state dict. Always contains ``_thread_id`` key so callers
+            can persist it for later resume / replay.
         """
+        # Generate before the graph call so it is available even if the graph
+        # crashes mid-run — the caller gets it from the exception handler.
+        run_thread_id = thread_id or str(uuid.uuid4())
+
+        if "config" not in kwargs:
+            kwargs["config"] = {"configurable": {"thread_id": run_thread_id}}
+
         initial_state = {
             "iac_code": iac_code,
             "file_path": file_path,
@@ -251,25 +261,31 @@ class ADAGGraph:
             "remediation_status": RemediationStatus.SKIPPED,
         }
 
-        # Each scan gets a fresh UUID thread_id so LangGraph never resumes
-        # from a stale checkpoint written by a previous (possibly failed) run.
-        if "config" not in kwargs:
-            kwargs["config"] = {"configurable": {"thread_id": str(uuid.uuid4())}}
+        raw = self.graph.invoke(initial_state, **kwargs)
 
-        return self.graph.invoke(initial_state, **kwargs)
+        # Staple thread_id onto the result so callers never lose it.
+        raw["_thread_id"] = run_thread_id
+        return raw
 
-    def stream(self, iac_code: str, file_path: str, **kwargs):
+    def stream(self, iac_code: str, file_path: str, thread_id: Optional[str] = None, **kwargs):
         """
         Stream the audit workflow execution.
 
         Args:
             iac_code: Raw infrastructure-as-code content
             file_path: Path to the source file
+            thread_id: LangGraph thread ID. If None, a fresh UUID is generated.
             **kwargs: Additional stream options
 
         Yields:
-            State updates as the workflow progresses
+            State updates as the workflow progresses. The first yielded dict
+            contains ``_thread_id`` injected into its values.
         """
+        run_thread_id = thread_id or str(uuid.uuid4())
+
+        if "config" not in kwargs:
+            kwargs["config"] = {"configurable": {"thread_id": run_thread_id}}
+
         initial_state = {
             "iac_code": iac_code,
             "file_path": file_path,
@@ -285,7 +301,14 @@ class ADAGGraph:
             "remediation_status": RemediationStatus.SKIPPED,
         }
 
+        first = True
         for state in self.graph.stream(initial_state, **kwargs):
+            if first:
+                # Inject thread_id into the first chunk so the caller has it
+                # regardless of which node emits first.
+                node_key = next(iter(state))
+                state[node_key]["_thread_id"] = run_thread_id
+                first = False
             yield state
 
 

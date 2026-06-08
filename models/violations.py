@@ -155,6 +155,10 @@ class AuditResult(BaseModel):
         default=None,
         description="Error detail when status is ERROR"
     )
+    thread_id: Optional[str] = Field(
+        default=None,
+        description="LangGraph thread_id for this scan run — use with checkpoint_manager for replay and resume"
+    )
     
     @property
     def has_violations(self) -> bool:
@@ -181,6 +185,7 @@ class AuditResult(BaseModel):
         out = {
             "status": self.status.value,
             "file_path": self.file_path,
+            "thread_id": self.thread_id,
             "total_resources": self.total_resources,
             "summary": self.summary,
             "violation_counts": {

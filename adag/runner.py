@@ -19,6 +19,7 @@ Examples:
 """
 
 import os
+import uuid
 import logging
 from pathlib import Path
 from typing import List, Optional
@@ -130,10 +131,18 @@ class ADAGRunner:
             total_violations = 0
             for tf_file in tf_files:
                 logger.info(f"Scanning: {tf_file}")
-                with AuditSpan("file.scan", file=str(tf_file)) as span:
+                # Generate thread_id BEFORE try so it survives exceptions.
+                # Even a crashed scan returns an AuditResult with this id,
+                # allowing resume() to pick up from the last saved checkpoint.
+                run_thread_id = str(uuid.uuid4())
+                with AuditSpan("file.scan", file=str(tf_file), thread_id=run_thread_id) as span:
                     try:
                         iac_code = tf_file.read_text(encoding="utf-8")
-                        raw = graph.invoke(iac_code=iac_code, file_path=str(tf_file))
+                        raw = graph.invoke(
+                            iac_code=iac_code,
+                            file_path=str(tf_file),
+                            thread_id=run_thread_id,
+                        )
                         result = AuditResult(
                             status=raw.get("status", AuditStatus.ERROR),
                             file_path=raw.get("file_path", str(tf_file)),
@@ -142,6 +151,7 @@ class ADAGRunner:
                             suggestions=raw.get("remediation_patches", []),
                             summary=self._build_summary(raw),
                             error_message=raw.get("error_message") or None,
+                            thread_id=run_thread_id,
                         )
                         n_violations = len(result.violations)
                         total_violations += n_violations
@@ -158,6 +168,7 @@ class ADAGRunner:
                             total_resources=0,
                             violations=[],
                             summary=f"Scan failed: {e}",
+                            thread_id=run_thread_id,  # preserved for resume()
                         )
                         span.set(status="error", error=str(e))
                 results.append(result)
@@ -169,6 +180,46 @@ class ADAGRunner:
             )
 
         return results
+
+    def resume(self, thread_id: str) -> "AuditResult":
+        """
+        Resume a scan that crashed or was interrupted before finishing.
+
+        Delegates to CheckpointManager.resume() which uses the SQLite
+        checkpoints to pick up from the last successfully completed node.
+        If the run already reached END the saved final state is returned
+        without re-running any LLM calls.
+
+        Args:
+            thread_id: The thread_id value from a previous AuditResult.
+
+        Returns:
+            AuditResult populated from the resumed (or already-complete) run.
+
+        Example::
+
+            results = runner.scan()
+            # If a scan failed mid-run:
+            if results[0].status.value == "error":
+                fixed = runner.resume(results[0].thread_id)
+        """
+        from models.violations import AuditResult, AuditStatus
+        from core.checkpoint_manager import CheckpointManager
+
+        graph = self._get_graph()
+        cm = CheckpointManager(graph)
+        raw = cm.resume(thread_id)
+
+        return AuditResult(
+            status=raw.get("status", AuditStatus.ERROR),
+            file_path=raw.get("file_path", "unknown"),
+            total_resources=len(raw.get("parsed_resources", [])),
+            violations=raw.get("violations", []),
+            suggestions=raw.get("remediation_patches", []),
+            summary=self._build_summary(raw),
+            error_message=raw.get("error_message") or None,
+            thread_id=thread_id,
+        )
 
     # ------------------------------------------------------------------
     # Private helpers
